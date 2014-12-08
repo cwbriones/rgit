@@ -1,0 +1,9 @@
+[package]
+
+name = "rgit"
+version = "0.0.1"
+authors = ["Christian Briones <christian@gmail.com>"]
+
+[[bin]]
+
+name = "rgit"
