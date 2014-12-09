@@ -10,12 +10,12 @@ rgit clone https://github.com/cwbriones/rgit
 ```
 
 ## Todo
-- [ ] Transport Protocol and Pack Wire Protocol
- - [x] Reference Discovery (ls-remote)
+- Transport Protocol and Pack Wire Protocol
+  - [x] Reference Discovery (ls-remote)
   - [ ] Capabilities
-   - [ ] Packfile Negotiation
-   - [ ] Delta Encoding
-   - [ ] Repo and Object Storage Format
-   - [ ] Refs
-   - [ ] Working Copy and Index
-   - [ ] Clone Command
+  - [ ] Packfile Negotiation
+- [ ] Delta Encoding
+- [ ] Repo and Object Storage Format
+- [ ] Refs
+- [ ] Working Copy and Index
+- [ ] Clone Command
