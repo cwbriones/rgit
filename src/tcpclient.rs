@@ -34,9 +34,7 @@ pub fn receive(socket: &mut TcpStream) -> IoResult<Vec<String>> {
     }
 }
 
-// pub fn with_connection<T>(host: &str, port: u16, consumer: |&mut TcpStream| -> IoResult<T>) -> IoResult<T> {
-//     match TcpStream::connect((host, port)) {
-//         Ok(mut sock) => {consumer(&mut sock)},
-//         Err(e) => Err(e)
-//     }
-// }
+pub fn with_connection<T>(host: &str, port: u16, consumer: |&mut TcpStream| -> IoResult<T>) -> IoResult<T> {
+    let mut sock = try!(TcpStream::connect((host, port)));
+    consumer(&mut sock)
+}

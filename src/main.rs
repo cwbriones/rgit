@@ -1,4 +1,4 @@
-use std::io::{IoResult, TcpStream};
+use std::io::IoResult;
 
 mod tcpclient;
 
@@ -31,15 +31,15 @@ fn git_proto_request(host: &str, repo: &str) -> String {
 }
 
 fn ls_remote(host: &str, port: u16, repo: &str) -> IoResult<Vec<String>> {
-    let mut sock = TcpStream::connect((host, port)).unwrap();
+    tcpclient::with_connection(host, port, |sock| {
+        let payload = git_proto_request(host, repo).into_bytes();
+        try!(sock.write(payload.as_slice()));
 
-    let payload = git_proto_request(host, repo).into_bytes();
-    try!(sock.write(payload.as_slice()));
+        let lines = try!(tcpclient::receive(sock));
+        println!("");
 
-    let lines = try!(tcpclient::receive(&mut sock));
-    println!("");
-
-    let flush_pkt = "0000".as_bytes();
-    try!(sock.write(flush_pkt));
-    Ok(lines)
+        let flush_pkt = "0000".as_bytes();
+        try!(sock.write(flush_pkt));
+        Ok(lines)
+    })
 }
