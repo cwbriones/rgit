@@ -7,15 +7,9 @@ pub fn receive(socket: &mut TcpStream) -> IoResult<Vec<String>> {
     let mut lines = vec![];
     loop {
         match read_packet_line(socket) {
-            Ok(Some(line)) => {
-                lines.push(line);
-            },
-            Ok(None) => {
-                return Ok(lines);
-            },
-            Err(e) => {
-                return Err(e);
-            }
+            Ok(Some(line)) => lines.push(line),
+            Ok(None)       => return Ok(lines),
+            Err(e)         => return Err(e)
         }
     }
 }
@@ -24,6 +18,10 @@ pub fn with_connection<T>(host: &str, port: u16, consumer: |&mut TcpStream| -> I
     let mut sock = try!(TcpStream::connect((host, port)));
     consumer(&mut sock)
 }
+
+// receive_with_sideband
+// receive_fully
+// send
 
 // Reads and parses a packet-line from the server.
 fn read_packet_line(socket: &mut TcpStream) -> IoResult<Option<String>> {
@@ -34,10 +32,8 @@ fn read_packet_line(socket: &mut TcpStream) -> IoResult<Option<String>> {
     if length > 4 {
         let pkt = try!(socket.read_exact(length - 4));
         let parsed = String::from_utf8(pkt).unwrap();
-        print!("packet: \t<git {}", parsed);
         Ok(Some(parsed))
     } else {
-        print!("packet: \t<git {}", length_str);
         Ok(None)
     }
 }
