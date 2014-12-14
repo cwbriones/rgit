@@ -10,29 +10,15 @@ enum PacketLine {
 
 // Encodes a packet-line for communcation.
 fn pktline(msg: &str) -> String {
-    let mut s = format!("{:04x}", 4 + msg.len() as u8);
-    s.push_str(msg);
-    s
+    format!("{:04x}{}", 4 + msg.len() as u8, msg)
 }
 
 // Creates the proto request needed to initiate a
 // connection.
 fn git_proto_request(host: &str, repo: &str) -> String {
-    let mut result = String::from_str("git-upload-pack /");
-
-    result.push_str(repo);
-    result.push_str("\0host=");
-    result.push_str(host);
-    result.push_str("\0");
-
-    pktline(result.as_slice())
+    let s = ["git-upload-pack /", repo, "\0host=", host, "\0"].concat();
+    pktline(s.as_slice())
 }
-
-// fn create_negotiation_request(capabilities: &[String], refs: &[String]) -> String {
-//     // Create a want request for each packet
-//     // append capabilities to the first ref request
-//     // only send refs that are not peeled and in refs/{heads,tags}kk
-// }
 
 pub fn ls_remote(host: &str, port: u16, repo: &str) -> int {
     match ls_remote_priv(host, port, repo) {
@@ -68,6 +54,28 @@ fn ls_remote_priv(host: &str, port: u16, repo: &str) -> IoResult<Vec<PacketLine>
 
         Ok(parse_lines(lines))
     })
+}
+
+fn create_negotiation_request(capabilities: &[&str], refs: &[PacketLine]) -> String {
+    // Create a want request for each packet
+    // append capabilities to the first ref request
+    // only send refs that are not peeled and in refs/{heads,tags}
+    // -- PKT-LINE("want" SP obj-id SP capability-list LF)
+    // -- PKT-LINE("want" SP obj-id LF)
+    let mut lines = Vec::with_capacity(refs.len());
+    for r in refs.iter() {
+        let s = match *r {
+            PacketLine::FirstLine(ref o, ref r, ref c) => {
+                ["want", o.as_slice(), r.as_slice(), "\n"].concat()
+            },
+            PacketLine::RefLine(ref o, ref r) => {
+                ["want", o.as_slice(), r.as_slice(), "\n"].concat()
+            },
+            _ => String::new()
+        };
+        lines.push(pktline(s.as_slice()));
+    }
+    lines.concat()
 }
 
 pub fn parse_lines(lines: Vec<String>) -> Vec<PacketLine> {
