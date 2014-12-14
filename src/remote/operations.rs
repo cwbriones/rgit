@@ -1,6 +1,7 @@
 use std::io::IoResult;
 use remote::tcpclient;
 
+#[deriving(Show)]
 enum PacketLine {
     FirstLine(String, String, Vec<String>),
     RefLine(String, String),
@@ -27,14 +28,34 @@ fn git_proto_request(host: &str, repo: &str) -> String {
     pktline(result.as_slice())
 }
 
-fn create_negotiation_request(capabilities: &[String], refs: &[String]) -> String {
-    // Create a want request for each packet
-    // append capabilities to the first ref request
-    // only send refs that are not peeled and in refs/{heads,tags}kk
+// fn create_negotiation_request(capabilities: &[String], refs: &[String]) -> String {
+//     // Create a want request for each packet
+//     // append capabilities to the first ref request
+//     // only send refs that are not peeled and in refs/{heads,tags}kk
+// }
+
+pub fn ls_remote(host: &str, port: u16, repo: &str) -> int {
+    match ls_remote_priv(host, port, repo) {
+        Ok(pktlines) => {
+            print_packetlines(&pktlines);
+            0
+        },
+        Err(_) => -1
+    }
+}
+
+fn print_packetlines(pktlines: &Vec<PacketLine>) {
+    for p in pktlines.iter() {
+        match *p {
+            PacketLine::FirstLine(ref o, ref r, _) => print!("{}\t{}\n", o, r),
+            PacketLine::RefLine(ref o, ref r) => print!("{}\t{}\n", o, r),
+            _ => println!("")
+        }
+    }
 }
 
 // Lists all the refs from the given git repo.
-pub fn ls_remote(host: &str, port: u16, repo: &str) -> IoResult<Vec<PacketLine>> {
+fn ls_remote_priv(host: &str, port: u16, repo: &str) -> IoResult<Vec<PacketLine>> {
     tcpclient::with_connection(host, port, |sock| {
         let payload = git_proto_request(host, repo).into_bytes();
         try!(sock.write(payload.as_slice()));
@@ -50,41 +71,26 @@ pub fn ls_remote(host: &str, port: u16, repo: &str) -> IoResult<Vec<PacketLine>>
 }
 
 pub fn parse_lines(lines: Vec<String>) -> Vec<PacketLine> {
-    let mut result = vec![];
-    for (i, line) in lines.into_iter().enumerate() {
-        if i == 0 {
-            result.push(parse_first_line(line));
-        } else {
-            result.push(parse_line(line))
-        }
-    }
-    result
+    lines.iter().map(|s| parse_line(s.trim_right_chars('\n'))).collect::<Vec<_>>()
 }
 
-pub fn parse_first_line(line: String) -> PacketLine {
+pub fn parse_line(line: &str) -> PacketLine {
     let split_str = line
-        .as_slice()
         .split('\0')
         .collect::<Vec<_>>();
 
     match split_str.as_slice() {
-        [objectid, reference, capabilities] => {
-            let v = capabilities.as_slice().split(' ').map(|s| {s.to_string()}).collect::<Vec<_>>();
-            PacketLine::FirstLine(objectid.to_string(), reference.to_string(), v)
+        [objectid, reference] => {
+            let c = reference.as_slice().split(' ').map(|s| s.to_string()).collect::<Vec<_>>();
+            PacketLine::FirstLine(objectid.to_string(), reference.to_string(), c)
+        },
+        [otherline] => {
+            let v = otherline.as_slice().split(' ').collect::<Vec<_>>();
+            match v.as_slice() {
+                [o, r] => PacketLine::RefLine(o.to_string(), r.to_string()),
+                _ => PacketLine::LastLine
+            }
         }
-        _ => panic!("error parsing first line!")
-    }
-}
-
-pub fn parse_line(line: String) -> PacketLine {
-    let split_str = line
-        .as_slice()
-        .split('\0')
-        .collect::<Vec<_>>();
-
-    match split_str.as_slice() {
-        [objectid, reference] => PacketLine::RefLine(objectid.to_string(), reference.to_string()),
-        [_objectid] => PacketLine::LastLine,
         _ => panic!("error parsing packetline")
     }
 }

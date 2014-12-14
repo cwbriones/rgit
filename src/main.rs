@@ -23,8 +23,7 @@ fn main() {
 fn run_command(command: &String, args: &[String]) -> int {
     match command.as_slice() {
         "ls-remote" => {
-            remote_ops::ls_remote("127.0.0.1", 9418, "rgit");
-            0
+            remote_ops::ls_remote("127.0.0.1", 9418, "rgit")
         },
         unknown => {
             println!("Unknown command: {}", unknown);
