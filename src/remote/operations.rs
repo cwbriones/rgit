@@ -74,20 +74,25 @@ pub fn parse_lines(lines: Vec<String>) -> Vec<PacketLine> {
     lines.iter().map(|s| parse_line(s.trim_right_chars('\n'))).collect::<Vec<_>>()
 }
 
+// TODO: This is messy and inefficient since we don't need to create this many owned strings
 pub fn parse_line(line: &str) -> PacketLine {
     let split_str = line
         .split('\0')
         .collect::<Vec<_>>();
 
     match split_str.as_slice() {
-        [objectid, reference] => {
-            let c = reference.as_slice().split(' ').map(|s| s.to_string()).collect::<Vec<_>>();
-            PacketLine::FirstLine(objectid.to_string(), reference.to_string(), c)
-        },
-        [otherline] => {
-            let v = otherline.as_slice().split(' ').collect::<Vec<_>>();
+        [object_ref, capabilities] => {
+            let v = object_ref.as_slice().split(' ').collect::<Vec<_>>();
+            let c = capabilities.as_slice().split(' ').map(|s| s.to_string()).collect::<Vec<_>>();
             match v.as_slice() {
-                [o, r] => PacketLine::RefLine(o.to_string(), r.to_string()),
+                [ref obj_id, ref r] => PacketLine::FirstLine(obj_id.to_string(), r.to_string(), c),
+                _ => PacketLine::LastLine
+            }
+        },
+        [object_ref] => {
+            let v = object_ref.as_slice().split(' ').collect::<Vec<_>>();
+            match v.as_slice() {
+                [obj_id, r] => PacketLine::RefLine(obj_id.to_string(), r.to_string()),
                 _ => PacketLine::LastLine
             }
         }
