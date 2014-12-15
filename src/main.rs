@@ -1,3 +1,4 @@
+#![feature(advanced_slice_patterns)]
 extern crate getopts;
 
 use std::os;
