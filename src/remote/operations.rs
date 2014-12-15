@@ -56,14 +56,26 @@ fn ls_remote_priv(host: &str, port: u16, repo: &str) -> IoResult<Vec<PacketLine>
     })
 }
 
+// Create a want request for each packet
+// append capabilities to the first ref request
+// only send refs that are not peeled and in refs/{heads,tags}
+// -- PKT-LINE("want" SP obj-id SP capability-list LF)
+// -- PKT-LINE("want" SP obj-id LF)
 fn create_negotiation_request(capabilities: &[&str], refs: &[PacketLine]) -> String {
-    // Create a want request for each packet
-    // append capabilities to the first ref request
-    // only send refs that are not peeled and in refs/{heads,tags}
-    // -- PKT-LINE("want" SP obj-id SP capability-list LF)
-    // -- PKT-LINE("want" SP obj-id LF)
     let mut lines = Vec::with_capacity(refs.len());
-    for r in refs.iter() {
+    let mut filtered = refs.iter().filter(|item| {
+        match *item {
+            &PacketLine::FirstLine(_, ref r, _) => {
+                !r.ends_with("^{}") && (r.starts_with("refs/heads") || r.starts_with("refs/tags"))
+            },
+            &PacketLine::RefLine(_, ref r) => {
+                !r.ends_with("^{}") && (r.starts_with("refs/heads") || r.starts_with("refs/tags"))
+            },
+            _ => false
+        }
+    });
+
+    for r in filtered {
         let s = match *r {
             PacketLine::FirstLine(ref o, ref r, ref c) => {
                 ["want", o.as_slice(), r.as_slice(), "\n"].concat()
