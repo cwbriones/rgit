@@ -12,7 +12,10 @@ pub fn receive(socket: &mut TcpStream) -> IoResult<Vec<String>> {
     let mut lines = vec![];
     loop {
         match read_packet_line(socket) {
-            Ok(Some(line)) => lines.push(line),
+            Ok(Some(line)) => {
+                let s: String = str::from_utf8(line.as_slice()).unwrap().to_string();
+                lines.push(s)
+            }
             Ok(None)       => return Ok(lines),
             Err(e)         => return Err(e)
         }
@@ -36,14 +39,12 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> IoResult<Vec<u8>> {
     loop {
         match try!(read_packet_line(socket)) {
             Some(line) => {
-                if line == "NAK\n" {
+                if line.as_slice() == "NAK\n".as_bytes() {
                     continue;
                 }
-                let bytes = line.into_bytes();
-                match bytes.as_slice() {
+                match line.as_slice() {
                     [1, rest..] => {
-                        println!("receiving packfile data");
-                        packfile_data.push_all(bytes.slice_from(1))
+                        packfile_data.push_all(line.slice_from(1))
                     }
                     [2, msg_bytes..] => {
                         let msg = str::from_utf8(msg_bytes).unwrap();
@@ -65,17 +66,14 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> IoResult<Vec<u8>> {
 }
 
 /// Reads and parses a packet-line from the server.
-fn read_packet_line(socket: &mut TcpStream) -> IoResult<Option<String>> {
+fn read_packet_line(socket: &mut TcpStream) -> IoResult<Option<Vec<u8>>> {
     let header = try!(socket.read_exact(4));
     let length_str = str::from_utf8(header.as_slice()).unwrap();
     let length: uint = num::from_str_radix(length_str, 16).unwrap();
 
     if length > 4 {
         let pkt = try!(socket.read_exact(length - 4));
-        match String::from_utf8(pkt) {
-            Ok(parsed) => Ok(Some(parsed)),
-            Err(_) => Ok(None)
-        }
+        Ok(Some(pkt))
     } else {
         Ok(None)
     }

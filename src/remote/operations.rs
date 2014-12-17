@@ -35,10 +35,8 @@ pub fn clone_priv(host: &str, port: u16, repo: &str) -> IoResult<()> {
     let filepath = dir.join("pack_file_incoming");
 
     if let Ok(mut file) = File::open_mode(&filepath, Open, Write) {
-        println!("writing packfile: {}", packfile.len());
         file.write(packfile.as_slice());
     }
-    // write packfile to dir/pack_file_incoming
     // parse packfile
     // checkout head
     Ok(())
