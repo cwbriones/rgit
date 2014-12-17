@@ -34,21 +34,30 @@ pub fn with_connection<T>(host: &str, port: u16, consumer: |&mut TcpStream| -> I
 pub fn receive_with_sideband(socket: &mut TcpStream) -> IoResult<Vec<u8>> {
     let mut packfile_data = Vec::new();
     loop {
-        let line = try!(read_packet_line(socket)).unwrap();
-        let bytes = line.into_bytes();
-        match bytes.as_slice() {
-            [1, rest..] => packfile_data.push_all(bytes.slice_from(1)),
-            [2, _] => println!("info?"), // info to print
-            _ => {
-                return Err(IoError {
-                    kind: OtherIoError,
-                    desc: "Git server returned error",
-                    detail: None,
-                })
+        match try!(read_packet_line(socket)) {
+            Some(line) => {
+                if line == "NAK\n" {
+                    continue;
+                }
+                let bytes = line.into_bytes();
+                match bytes.as_slice() {
+                    [1, rest..] => packfile_data.push_all(bytes.slice_from(1)),
+                    [2, msg_bytes..] => {
+                        let msg = str::from_utf8(msg_bytes).unwrap();
+                        print!("{}", msg);
+                    }
+                    stuff => {
+                        return Err(IoError {
+                            kind: OtherIoError,
+                            desc: "Git server returned error",
+                            detail: None,
+                        })
+                    }
+                }
             }
+            None => return Ok(packfile_data)
         }
     }
-
     Ok(packfile_data)
 }
 
@@ -60,8 +69,10 @@ fn read_packet_line(socket: &mut TcpStream) -> IoResult<Option<String>> {
 
     if length > 4 {
         let pkt = try!(socket.read_exact(length - 4));
-        let parsed = String::from_utf8(pkt).unwrap();
-        Ok(Some(parsed))
+        match String::from_utf8(pkt) {
+            Ok(parsed) => Ok(Some(parsed)),
+            Err(_) => Ok(None)
+        }
     } else {
         Ok(None)
     }

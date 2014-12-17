@@ -1,6 +1,35 @@
 use std::io::IoResult;
 use remote::tcpclient;
 
+// --------------------------------------------
+// Receive Packfile algorithm:
+// --------------------------------------------
+pub fn receive_packfile(host: &str, port: u16, repo: &str) -> IoResult<Vec<u8>> {
+    tcpclient::with_connection(host, port, |sock| {
+        let payload = git_proto_request(host, repo).into_bytes();
+        try!(sock.write(payload.as_slice()));
+
+        let response = try!(tcpclient::receive(sock));
+        let packets = parse_lines(response);
+
+        let caps = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
+        let mut request = create_negotiation_request(caps.as_slice(), packets.as_slice());
+        request.push_str("0000");
+        request.push_str(pktline("done\n").as_slice());
+        try!(sock.write(request.as_bytes()));
+
+        tcpclient::receive_with_sideband(sock)
+    })
+}
+
+// --------------------------------------------
+// Clone priv order algorithm:
+// --------------------------------------------
+// Receive packfile and refs
+// write packfile to a temporary known location
+// Parses the pack file
+// Checks out the HEAD in the working directory
+
 #[deriving(Show)]
 enum PacketLine {
     FirstLine(String, String, Vec<String>),
@@ -75,17 +104,19 @@ fn create_negotiation_request(capabilities: &[&str], refs: &[PacketLine]) -> Str
         }
     });
 
-    for r in filtered {
-        let s = match *r {
-            PacketLine::FirstLine(ref o, ref r, ref c) => {
-                ["want", o.as_slice(), r.as_slice(), "\n"].concat()
-            },
+    for (i, r) in filtered.enumerate() {
+        match *r {
             PacketLine::RefLine(ref o, ref r) => {
-                ["want", o.as_slice(), r.as_slice(), "\n"].concat()
+                if i == 0 {
+                    let caps = capabilities.connect(" ");
+                    let line = ["want ", o.as_slice(), " ", caps.as_slice(), "\n"].concat();
+                    lines.push(pktline(line.as_slice()));
+                }
+                let line = ["want ", o.as_slice(), "\n"].concat();
+                lines.push(pktline(line.as_slice()));
             },
-            _ => String::new()
+            _ => ()
         };
-        lines.push(pktline(s.as_slice()));
     }
     lines.concat()
 }

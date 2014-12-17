@@ -23,6 +23,10 @@ fn main() {
 
 fn run_command(command: &String, args: &[String]) -> int {
     match command.as_slice() {
+        "test" => {
+            let pack = remote_ops::receive_packfile("127.0.0.1", 9418, "rgit");
+            0
+        }
         "ls-remote" => {
             remote_ops::ls_remote("127.0.0.1", 9418, "rgit")
         },
