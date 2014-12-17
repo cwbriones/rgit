@@ -41,7 +41,10 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> IoResult<Vec<u8>> {
                 }
                 let bytes = line.into_bytes();
                 match bytes.as_slice() {
-                    [1, rest..] => packfile_data.push_all(bytes.slice_from(1)),
+                    [1, rest..] => {
+                        println!("receiving packfile data");
+                        packfile_data.push_all(bytes.slice_from(1))
+                    }
                     [2, msg_bytes..] => {
                         let msg = str::from_utf8(msg_bytes).unwrap();
                         print!("{}", msg);

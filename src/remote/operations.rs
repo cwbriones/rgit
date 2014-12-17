@@ -4,7 +4,7 @@ use remote::tcpclient;
 // --------------------------------------------
 // Receive Packfile algorithm:
 // --------------------------------------------
-pub fn receive_packfile(host: &str, port: u16, repo: &str) -> IoResult<Vec<u8>> {
+pub fn receive_packfile(host: &str, port: u16, repo: &str) -> IoResult<(Vec<PacketLine>, Vec<u8>)> {
     tcpclient::with_connection(host, port, |sock| {
         let payload = git_proto_request(host, repo).into_bytes();
         try!(sock.write(payload.as_slice()));
@@ -18,17 +18,31 @@ pub fn receive_packfile(host: &str, port: u16, repo: &str) -> IoResult<Vec<u8>> 
         request.push_str(pktline("done\n").as_slice());
         try!(sock.write(request.as_bytes()));
 
-        tcpclient::receive_with_sideband(sock)
+        let packfile = try!(tcpclient::receive_with_sideband(sock));
+        Ok((packets, packfile))
     })
 }
 
-// --------------------------------------------
-// Clone priv order algorithm:
-// --------------------------------------------
-// Receive packfile and refs
-// write packfile to a temporary known location
-// Parses the pack file
-// Checks out the HEAD in the working directory
+pub fn clone_priv(host: &str, port: u16, repo: &str) -> IoResult<()> {
+    use std::io;
+    use std::io::{fs, File, Open, Write};
+
+    let (refs, packfile) = try!(receive_packfile(host, port, repo));
+
+    let dir = Path::new("temp_repo");
+    fs::mkdir(&dir, io::USER_RWX);
+
+    let filepath = dir.join("pack_file_incoming");
+
+    if let Ok(mut file) = File::open_mode(&filepath, Open, Write) {
+        println!("writing packfile: {}", packfile.len());
+        file.write(packfile.as_slice());
+    }
+    // write packfile to dir/pack_file_incoming
+    // parse packfile
+    // checkout head
+    Ok(())
+}
 
 #[deriving(Show)]
 enum PacketLine {
