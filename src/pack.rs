@@ -25,8 +25,8 @@ pub enum PackObjectType {
 
 impl PackFile {
     pub fn from_file(file: File) -> IoResult<PackFile> {
-        use std::io::IoError;
-        use std::io::file::File;
+        use std::old_io::IoError;
+        use std::old_io::file::File;
 
         // Read header bytes in big-endian format<LeftMouse>
         let magic = try!(File:read_be_u32());
@@ -88,7 +88,7 @@ impl PackObject {
 
     // Reads exactly size bytes of zlib inflated data from the filestream.
     fn read_content(file: &mut File, size: uint) -> IoResult<Vec<u8>> {
-        use std::io::BufReader;
+        use std::old_io::BufReader;
         let mut chunk = 16;
         let mut buffer;
         unsafe {

@@ -1,4 +1,4 @@
-use std::io::IoResult;
+use std::old_io::IoResult;
 use remote::tcpclient;
 
 // --------------------------------------------
@@ -24,13 +24,13 @@ pub fn receive_packfile(host: &str, port: u16, repo: &str) -> IoResult<(Vec<Pack
 }
 
 pub fn clone_priv(host: &str, port: u16, repo: &str) -> IoResult<()> {
-    use std::io;
-    use std::io::{fs, File, Open, Write};
+    use std::old_io;
+    use std::old_io::{fs, File, Open, Write};
 
     let (refs, packfile) = try!(receive_packfile(host, port, repo));
 
     let dir = Path::new("temp_repo");
-    fs::mkdir(&dir, io::USER_RWX);
+    fs::mkdir(&dir, old_io::USER_RWX);
 
     let filepath = dir.join("pack_file_incoming");
 
@@ -42,7 +42,7 @@ pub fn clone_priv(host: &str, port: u16, repo: &str) -> IoResult<()> {
     Ok(())
 }
 
-#[deriving(Show)]
+#[derive(Debug)]
 enum PacketLine {
     FirstLine(String, String, Vec<String>),
     RefLine(String, String),
@@ -57,7 +57,7 @@ fn pktline(msg: &str) -> String {
 // Creates the proto request needed to initiate a
 // connection.
 fn git_proto_request(host: &str, repo: &str) -> String {
-    let s = ["git-upload-pack /", repo, "\0host=", host, "\0"].concat();
+    let s: String = ["git-upload-pack /", repo, "\0host=", host, "\0"].concat();
     pktline(s.as_slice())
 }
 
@@ -121,10 +121,10 @@ fn create_negotiation_request(capabilities: &[&str], refs: &[PacketLine]) -> Str
             PacketLine::RefLine(ref o, ref r) => {
                 if i == 0 {
                     let caps = capabilities.connect(" ");
-                    let line = ["want ", o.as_slice(), " ", caps.as_slice(), "\n"].concat();
+                    let line: String = ["want ", o.as_slice(), " ", caps.as_slice(), "\n"].concat();
                     lines.push(pktline(line.as_slice()));
                 }
-                let line = ["want ", o.as_slice(), "\n"].concat();
+                let line: String = ["want ", o.as_slice(), "\n"].concat();
                 lines.push(pktline(line.as_slice()));
             },
             _ => ()
@@ -134,7 +134,7 @@ fn create_negotiation_request(capabilities: &[&str], refs: &[PacketLine]) -> Str
 }
 
 pub fn parse_lines(lines: Vec<String>) -> Vec<PacketLine> {
-    lines.iter().map(|s| parse_line(s.trim_right_chars('\n'))).collect::<Vec<_>>()
+    lines.iter().map(|s| parse_line(s.trim_right())).collect::<Vec<_>>()
 }
 
 // TODO: This is messy and inefficient since we don't need to create this many owned strings

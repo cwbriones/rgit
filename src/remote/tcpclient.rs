@@ -1,6 +1,6 @@
 use std::{str, num};
-use std::io::{IoResult, TcpStream};
-use std::io::{IoError, OtherIoError};
+use std::old_io::{IoResult, TcpStream};
+use std::old_io::{IoError, OtherIoError};
 
 // TODO:
 // receive_fully
@@ -22,7 +22,9 @@ pub fn receive(socket: &mut TcpStream) -> IoResult<Vec<String>> {
     }
 }
 
-pub fn with_connection<T>(host: &str, port: u16, consumer: |&mut TcpStream| -> IoResult<T>) -> IoResult<T> {
+pub fn with_connection<T, K>(host: &str, port: u16, consumer: K) -> IoResult<T>
+    where K: Fn(&mut TcpStream) -> IoResult<T>
+{
     let mut sock = try!(TcpStream::connect((host, port)));
     consumer(&mut sock)
 }

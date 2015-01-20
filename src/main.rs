@@ -1,3 +1,4 @@
+#![allow(unstable)]
 #![feature(advanced_slice_patterns)]
 extern crate getopts;
 
@@ -5,6 +6,7 @@ use std::os;
 use remote::operations as remote_ops;
 
 mod remote;
+mod zlib;
 
 fn main() {
     let args: Vec<String> = os::args();
@@ -21,7 +23,7 @@ fn main() {
     }
 }
 
-fn run_command(command: &String, args: &[String]) -> int {
+fn run_command(command: &String, args: &[String]) -> isize {
     match command.as_slice() {
         "test" => {
             match remote_ops::clone_priv("127.0.0.1", 9418, "rgit") {
