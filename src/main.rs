@@ -1,12 +1,13 @@
 #![allow(unstable)]
 #![feature(advanced_slice_patterns)]
 extern crate getopts;
+extern crate flate2;
 
 use std::os;
 use remote::operations as remote_ops;
 
 mod remote;
-mod zlib;
+mod pack;
 
 fn main() {
     let args: Vec<String> = os::args();

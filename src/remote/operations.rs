@@ -1,5 +1,8 @@
 use std::old_io::IoResult;
 use remote::tcpclient;
+use pack::PackFile;
+
+use std::fs::File as NewFile;
 
 // --------------------------------------------
 // Receive Packfile algorithm:
@@ -38,6 +41,8 @@ pub fn clone_priv(host: &str, port: u16, repo: &str) -> IoResult<()> {
         file.write(packfile.as_slice());
     }
     // parse packfile
+    let tmp = NewFile::open(&filepath).unwrap();
+    let parsed_packfile = PackFile::from_file(tmp);
     // checkout head
     Ok(())
 }
@@ -61,7 +66,7 @@ fn git_proto_request(host: &str, repo: &str) -> String {
     pktline(s.as_slice())
 }
 
-pub fn ls_remote(host: &str, port: u16, repo: &str) -> int {
+pub fn ls_remote(host: &str, port: u16, repo: &str) -> isize {
     match ls_remote_priv(host, port, repo) {
         Ok(pktlines) => {
             print_packetlines(&pktlines);

@@ -4,8 +4,8 @@ name = "rgit"
 version = "0.0.1"
 authors = ["Christian Briones <christian@gmail.com>"]
 
-[dependencies.miniz-sys]
-version = "0.1.0"
+[dependencies.flate2]
+path = "../flate2"
 
 [[bin]]
 name = "rgit"

@@ -1,3 +1,6 @@
+#![feature(core)]
+#![feature(collections)]
+
 use std::{str, num};
 use std::old_io::{IoResult, TcpStream};
 use std::old_io::{IoError, OtherIoError};
@@ -71,7 +74,7 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> IoResult<Vec<u8>> {
 fn read_packet_line(socket: &mut TcpStream) -> IoResult<Option<Vec<u8>>> {
     let header = try!(socket.read_exact(4));
     let length_str = str::from_utf8(header.as_slice()).unwrap();
-    let length: uint = num::from_str_radix(length_str, 16).unwrap();
+    let length: usize = num::from_str_radix(length_str, 16).unwrap();
 
     if length > 4 {
         let pkt = try!(socket.read_exact(length - 4));
