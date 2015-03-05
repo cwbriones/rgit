@@ -13,7 +13,7 @@ pub struct PackFile {
 
 pub struct PackfileObject {
     obj_type: PackObjectType,
-    size: uint,
+    size: usize,
     content: Vec<u8>
 }
 
@@ -53,12 +53,10 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<PackfileObjec
     let mut objects = Vec::with_capacity(num_objects as usize);
 
     let mut contents = Vec::new();
-    file.read_to_end(&mut contents);
+    file.read_to_end(&mut contents).ok().expect("Error reading file contents");
     let mut cursor = Cursor::new(contents);
-    let mut total_in = 0u64;
 
-
-    for i in 0..num_objects {
+    for _ in 0..num_objects {
       let mut c = read_byte(&mut cursor);
       let type_id = (c >> 4) & 7;
 
@@ -106,7 +104,7 @@ fn read_object_content(in_data: &mut Cursor<Vec<u8>>, size: usize) -> Vec<u8> {
       }
       (buf, z.total_in() + current)
     };
-    in_data.seek(SeekFrom::Start(new_pos));
+    in_data.seek(SeekFrom::Start(new_pos)).ok().expect("Error rewinding packfile data");
     content
 }
 
@@ -121,7 +119,7 @@ fn read_object_type<R>(r: &mut R, id: u8) -> Option<PackObjectType> where R: Rea
         },
         7 => {
             let mut base: [u8; 20] = [0; 20];
-            for i in range(0, 20) {
+            for i in 0..20 {
                 base[i] = read_byte(r);
             }
             Some(PackObjectType::RefDelta(base))
@@ -138,9 +136,9 @@ fn read_object_type<R>(r: &mut R, id: u8) -> Option<PackObjectType> where R: Rea
 // to the result.
 fn read_offset<R>(r: &mut R) -> u8 where R: Read {
     let mut shift = 0;
-    let mut c;
+    let mut c = 0x80;
     let mut offset = 0;
-    loop {
+    while c & 0x80 > 0 {
         c = read_byte(r);
         offset += (c & 0x7f) << shift;
         shift += 7;

@@ -10,16 +10,16 @@ use std::fs::File as NewFile;
 pub fn receive_packfile(host: &str, port: u16, repo: &str) -> IoResult<(Vec<PacketLine>, Vec<u8>)> {
     tcpclient::with_connection(host, port, |sock| {
         let payload = git_proto_request(host, repo).into_bytes();
-        try!(sock.write(payload.as_slice()));
+        try!(sock.write_all(&payload[..]));
 
         let response = try!(tcpclient::receive(sock));
         let packets = parse_lines(response);
 
         let caps = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
-        let mut request = create_negotiation_request(caps.as_slice(), packets.as_slice());
+        let mut request = create_negotiation_request(&caps[..], &packets[..]);
         request.push_str("0000");
-        request.push_str(pktline("done\n").as_slice());
-        try!(sock.write(request.as_bytes()));
+        request.push_str(&(pktline("done\n"))[..]);
+        try!(sock.write_all(request.as_bytes()));
 
         let packfile = try!(tcpclient::receive_with_sideband(sock));
         Ok((packets, packfile))
@@ -30,7 +30,7 @@ pub fn clone_priv(host: &str, port: u16, repo: &str) -> IoResult<()> {
     use std::old_io;
     use std::old_io::{fs, File, Open, Write};
 
-    let (refs, packfile) = try!(receive_packfile(host, port, repo));
+    let (_refs, packfile) = try!(receive_packfile(host, port, repo));
 
     let dir = Path::new("temp_repo");
     fs::mkdir(&dir, old_io::USER_RWX);
@@ -38,11 +38,11 @@ pub fn clone_priv(host: &str, port: u16, repo: &str) -> IoResult<()> {
     let filepath = dir.join("pack_file_incoming");
 
     if let Ok(mut file) = File::open_mode(&filepath, Open, Write) {
-        file.write(packfile.as_slice());
+        file.write(&packfile[..]);
     }
     // parse packfile
     let tmp = NewFile::open(&filepath).unwrap();
-    let parsed_packfile = PackFile::from_file(tmp);
+    let _parsed_packfile = PackFile::from_file(tmp);
     // checkout head
     Ok(())
 }
@@ -63,10 +63,10 @@ fn pktline(msg: &str) -> String {
 // connection.
 fn git_proto_request(host: &str, repo: &str) -> String {
     let s: String = ["git-upload-pack /", repo, "\0host=", host, "\0"].concat();
-    pktline(s.as_slice())
+    pktline(&s[..])
 }
 
-pub fn ls_remote(host: &str, port: u16, repo: &str) -> isize {
+pub fn ls_remote(host: &str, port: u16, repo: &str) -> i32 {
     match ls_remote_priv(host, port, repo) {
         Ok(pktlines) => {
             print_packetlines(&pktlines);
@@ -90,13 +90,13 @@ fn print_packetlines(pktlines: &Vec<PacketLine>) {
 fn ls_remote_priv(host: &str, port: u16, repo: &str) -> IoResult<Vec<PacketLine>> {
     tcpclient::with_connection(host, port, |sock| {
         let payload = git_proto_request(host, repo).into_bytes();
-        try!(sock.write(payload.as_slice()));
+        try!(sock.write_all(&payload[..]));
 
         let lines = try!(tcpclient::receive(sock));
 
         // Tell the server to close the connection
         let flush_pkt = "0000".as_bytes();
-        try!(sock.write(flush_pkt));
+        try!(sock.write_all(flush_pkt));
 
         Ok(parse_lines(lines))
     })
@@ -109,7 +109,7 @@ fn ls_remote_priv(host: &str, port: u16, repo: &str) -> IoResult<Vec<PacketLine>
 // -- PKT-LINE("want" SP obj-id LF)
 fn create_negotiation_request(capabilities: &[&str], refs: &[PacketLine]) -> String {
     let mut lines = Vec::with_capacity(refs.len());
-    let mut filtered = refs.iter().filter(|item| {
+    let filtered = refs.iter().filter(|item| {
         match *item {
             &PacketLine::FirstLine(_, ref r, _) => {
                 !r.ends_with("^{}") && (r.starts_with("refs/heads") || r.starts_with("refs/tags"))
@@ -123,14 +123,14 @@ fn create_negotiation_request(capabilities: &[&str], refs: &[PacketLine]) -> Str
 
     for (i, r) in filtered.enumerate() {
         match *r {
-            PacketLine::RefLine(ref o, ref r) => {
+            PacketLine::RefLine(ref o, _) => {
                 if i == 0 {
                     let caps = capabilities.connect(" ");
-                    let line: String = ["want ", o.as_slice(), " ", caps.as_slice(), "\n"].concat();
-                    lines.push(pktline(line.as_slice()));
+                    let line: String = ["want ", &o[..], " ", &caps[..], "\n"].concat();
+                    lines.push(pktline(&line[..]));
                 }
-                let line: String = ["want ", o.as_slice(), "\n"].concat();
-                lines.push(pktline(line.as_slice()));
+                let line: String = ["want ", &o[..], "\n"].concat();
+                lines.push(pktline(&line[..]));
             },
             _ => ()
         };
@@ -148,18 +148,18 @@ pub fn parse_line(line: &str) -> PacketLine {
         .split('\0')
         .collect::<Vec<_>>();
 
-    match split_str.as_slice() {
+    match &split_str[..] {
         [object_ref, capabilities] => {
-            let v = object_ref.as_slice().split(' ').collect::<Vec<_>>();
-            let c = capabilities.as_slice().split(' ').map(|s| s.to_string()).collect::<Vec<_>>();
-            match v.as_slice() {
+            let v = object_ref.split(' ').collect::<Vec<_>>();
+            let c = capabilities.split(' ').map(|s| s.to_string()).collect::<Vec<_>>();
+            match &v[..] {
                 [ref obj_id, ref r] => PacketLine::FirstLine(obj_id.to_string(), r.to_string(), c),
                 _ => PacketLine::LastLine
             }
         },
         [object_ref] => {
-            let v = object_ref.as_slice().split(' ').collect::<Vec<_>>();
-            match v.as_slice() {
+            let v = object_ref.split(' ').collect::<Vec<_>>();
+            match &v[..] {
                 [obj_id, r] => PacketLine::RefLine(obj_id.to_string(), r.to_string()),
                 _ => PacketLine::LastLine
             }

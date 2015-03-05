@@ -1,20 +1,23 @@
-#![allow(unstable)]
-#![feature(advanced_slice_patterns)]
+#![feature(io, fs)]
+#![feature(old_io, old_path)]
+#![feature(core)]
+#![feature(collections)]
+#![feature(exit_status)]
 extern crate getopts;
 extern crate flate2;
 
-use std::os;
+use std::env;
 use remote::operations as remote_ops;
 
 mod remote;
 mod pack;
 
 fn main() {
-    let args: Vec<String> = os::args();
+    let args: Vec<String> = env::args().collect();
 
     if args.len() > 1 {
-        let status_code = run_command(&args[1], args.slice_from(2));
-        os::set_exit_status(status_code);
+        let status_code = run_command(&args[1], &args[2..]);
+        env::set_exit_status(status_code);
     } else {
         let usage =
             "usage: rgit <command> [<args>]\n\n\
@@ -24,8 +27,8 @@ fn main() {
     }
 }
 
-fn run_command(command: &String, args: &[String]) -> isize {
-    match command.as_slice() {
+fn run_command(command: &String, _args: &[String]) -> i32 {
+    match &command[..] {
         "test" => {
             match remote_ops::clone_priv("127.0.0.1", 9418, "rgit") {
                 Ok(_) => 0,

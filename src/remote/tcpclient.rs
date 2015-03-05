@@ -1,6 +1,3 @@
-#![feature(core)]
-#![feature(collections)]
-
 use std::{str, num};
 use std::old_io::{IoResult, TcpStream};
 use std::old_io::{IoError, OtherIoError};
@@ -16,7 +13,7 @@ pub fn receive(socket: &mut TcpStream) -> IoResult<Vec<String>> {
     loop {
         match read_packet_line(socket) {
             Ok(Some(line)) => {
-                let s: String = str::from_utf8(line.as_slice()).unwrap().to_string();
+                let s: String = str::from_utf8(&line[..]).unwrap().to_string();
                 lines.push(s)
             }
             Ok(None)       => return Ok(lines),
@@ -44,18 +41,18 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> IoResult<Vec<u8>> {
     loop {
         match try!(read_packet_line(socket)) {
             Some(line) => {
-                if line.as_slice() == "NAK\n".as_bytes() {
+                if &line[..] == "NAK\n".as_bytes() {
                     continue;
                 }
-                match line.as_slice() {
-                    [1, rest..] => {
-                        packfile_data.push_all(line.slice_from(1))
+                match &line[..] {
+                    [1, _..] => {
+                        packfile_data.push_all(&line[1..])
                     }
                     [2, msg_bytes..] => {
                         let msg = str::from_utf8(msg_bytes).unwrap();
                         print!("{}", msg);
                     }
-                    stuff => {
+                    _ => {
                         return Err(IoError {
                             kind: OtherIoError,
                             desc: "Git server returned error",
@@ -67,13 +64,12 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> IoResult<Vec<u8>> {
             None => return Ok(packfile_data)
         }
     }
-    Ok(packfile_data)
 }
 
 /// Reads and parses a packet-line from the server.
 fn read_packet_line(socket: &mut TcpStream) -> IoResult<Option<Vec<u8>>> {
     let header = try!(socket.read_exact(4));
-    let length_str = str::from_utf8(header.as_slice()).unwrap();
+    let length_str = str::from_utf8(&header[..]).unwrap();
     let length: usize = num::from_str_radix(length_str, 16).unwrap();
 
     if length > 4 {
