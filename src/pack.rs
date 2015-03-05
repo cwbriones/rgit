@@ -17,6 +17,7 @@ pub struct PackfileObject {
     content: Vec<u8>
 }
 
+#[derive(Debug)]
 pub enum PackObjectType {
     Commit,
     Tree,
@@ -28,10 +29,12 @@ pub enum PackObjectType {
 
 impl PackFile {
     pub fn from_file(mut file: File) -> Self {
-        // Read header bytes in big-endian format<LeftMouse>
+        // Read header bytes in big-endian format
         let magic = read_be_u32(&mut file);
         let version = read_be_u32(&mut file);
         let num_objects = read_be_u32(&mut file);
+
+        println!("magic: {}, vsn: {}, num_objects: {}", magic, version, num_objects);
 
         if magic == MAGIC_HEADER {
             let objects = read_packfile_objects(&mut file, num_objects);
@@ -47,12 +50,13 @@ impl PackFile {
 }
 
 fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<PackfileObject> {
-    let mut objects = Vec::new();
+    let mut objects = Vec::with_capacity(num_objects as usize);
 
     let mut contents = Vec::new();
     file.read_to_end(&mut contents);
     let mut cursor = Cursor::new(contents);
     let mut total_in = 0u64;
+
 
     for i in 0..num_objects {
       let mut c = read_byte(&mut cursor);
@@ -74,6 +78,7 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<PackfileObjec
           "Error parsing object type in packfile"
           );
 
+      println!("object type {:?}", obj_type);
       let content = read_object_content(&mut cursor, size);
       let obj = PackfileObject {
           obj_type: obj_type,
@@ -95,10 +100,11 @@ fn read_object_content(in_data: &mut Cursor<Vec<u8>>, size: usize) -> Vec<u8> {
     let (content, new_pos) = {
       let mut z = ZlibDecoder::new(in_data.by_ref());
       let mut buf = Vec::with_capacity(size);
-      match z.read(&mut buf[..]) {
-          Ok(read_size) if read_size == size => (buf, z.total_in() + current),
-          _ => panic!("Wat")
+      z.read_to_end(&mut buf).ok().expect("Error reading object contents");
+      if size != buf.len() {
+          panic!("Size does not match for expected object contents")
       }
+      (buf, z.total_in() + current)
     };
     in_data.seek(SeekFrom::Start(new_pos));
     content
