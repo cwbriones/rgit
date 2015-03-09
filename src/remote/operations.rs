@@ -1,13 +1,16 @@
-use std::old_io::IoResult;
 use remote::tcpclient;
 use pack::PackFile;
 
-use std::fs::File as NewFile;
+use std::fs;
+use std::fs::File;
+
+use std::io;
+use std::io::Write;
 
 // --------------------------------------------
 // Receive Packfile algorithm:
 // --------------------------------------------
-pub fn receive_packfile(host: &str, port: u16, repo: &str) -> IoResult<(Vec<PacketLine>, Vec<u8>)> {
+pub fn receive_packfile(host: &str, port: u16, repo: &str) -> io::Result<(Vec<PacketLine>, Vec<u8>)> {
     tcpclient::with_connection(host, port, |sock| {
         let payload = git_proto_request(host, repo).into_bytes();
         try!(sock.write_all(&payload[..]));
@@ -26,23 +29,19 @@ pub fn receive_packfile(host: &str, port: u16, repo: &str) -> IoResult<(Vec<Pack
     })
 }
 
-pub fn clone_priv(host: &str, port: u16, repo: &str) -> IoResult<()> {
-    use std::old_io;
-    use std::old_io::{fs, File, Open, Write};
-
+pub fn clone_priv(host: &str, port: u16, repo: &str) -> io::Result<()> {
     let (_refs, packfile) = try!(receive_packfile(host, port, repo));
 
     let dir = Path::new("temp_repo");
-    fs::mkdir(&dir, old_io::USER_RWX);
+    fs::create_dir(&dir);
 
     let filepath = dir.join("pack_file_incoming");
 
-    if let Ok(mut file) = File::open_mode(&filepath, Open, Write) {
-        file.write(&packfile[..]);
-    }
-    // parse packfile
-    let tmp = NewFile::open(&filepath).unwrap();
-    let _parsed_packfile = PackFile::from_file(tmp);
+    let mut file = File::create(&filepath).unwrap();
+    file.write_all(&packfile[..]);
+    file = File::open(&filepath).unwrap();
+
+    let _parsed_packfile = PackFile::from_file(file);
     // checkout head
     Ok(())
 }
@@ -87,7 +86,7 @@ fn print_packetlines(pktlines: &Vec<PacketLine>) {
 }
 
 // Lists all the refs from the given git repo.
-fn ls_remote_priv(host: &str, port: u16, repo: &str) -> IoResult<Vec<PacketLine>> {
+fn ls_remote_priv(host: &str, port: u16, repo: &str) -> io::Result<Vec<PacketLine>> {
     tcpclient::with_connection(host, port, |sock| {
         let payload = git_proto_request(host, repo).into_bytes();
         try!(sock.write_all(&payload[..]));

@@ -1,5 +1,5 @@
 #![feature(io, fs)]
-#![feature(old_io, old_path)]
+#![feature(old_path)]
 #![feature(core)]
 #![feature(collections)]
 #![feature(exit_status)]
@@ -11,6 +11,7 @@ use remote::operations as remote_ops;
 
 mod remote;
 mod pack;
+mod reader;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

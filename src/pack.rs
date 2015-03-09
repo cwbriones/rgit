@@ -1,3 +1,5 @@
+use reader::MyReaderExt;
+
 use flate2::read::ZlibDecoder;
 
 use std::fs::File;
@@ -30,9 +32,9 @@ pub enum PackObjectType {
 impl PackFile {
     pub fn from_file(mut file: File) -> Self {
         // Read header bytes in big-endian format
-        let magic = read_be_u32(&mut file);
-        let version = read_be_u32(&mut file);
-        let num_objects = read_be_u32(&mut file);
+        let magic = file.read_be_u32().unwrap();
+        let version = file.read_be_u32().unwrap();
+        let num_objects = file.read_be_u32().unwrap();
 
         println!("magic: {}, vsn: {}, num_objects: {}", magic, version, num_objects);
 
@@ -57,7 +59,7 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<PackfileObjec
     let mut cursor = Cursor::new(contents);
 
     for _ in 0..num_objects {
-      let mut c = read_byte(&mut cursor);
+      let mut c = cursor.read_byte().unwrap();
       let type_id = (c >> 4) & 7;
 
       let mut size: usize = (c & 15) as usize;
@@ -67,7 +69,7 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<PackfileObjec
       // Read the MSB and check if we need to continue
       // consuming bytes to get the object size
       while c & 0x80 > 0 {
-          c = read_byte(&mut cursor);
+          c = cursor.read_byte().unwrap();
           size += ((c & 0x7f) as usize) << shift;
           shift += 7;
       }
@@ -120,7 +122,7 @@ fn read_object_type<R>(r: &mut R, id: u8) -> Option<PackObjectType> where R: Rea
         7 => {
             let mut base: [u8; 20] = [0; 20];
             for i in 0..20 {
-                base[i] = read_byte(r);
+                base[i] = r.read_byte().unwrap();
             }
             Some(PackObjectType::RefDelta(base))
         }
@@ -139,35 +141,10 @@ fn read_offset<R>(r: &mut R) -> u8 where R: Read {
     let mut c = 0x80;
     let mut offset = 0;
     while c & 0x80 > 0 {
-        c = read_byte(r);
+        c = r.read_byte().unwrap();
         offset += (c & 0x7f) << shift;
         shift += 7;
     }
     offset
-}
-
-fn read_byte<R>(r: &mut R) -> u8 where R: Read {
-  let mut buf = [0];
-  match r.read(&mut buf) {
-    Ok(s) if s == 1 => buf[0],
-    _ => panic!("error read_byte")
-  }
-}
-
-fn read_be_u32<R>(r: &mut R) -> u32 where R: Read {
-  let mut buf = [0; 4];
-  match r.read(&mut buf) {
-    Ok(s) if s == 4 => {
-        let mut result = 0u32;
-
-        // This is because I already know my system is be
-        for i in buf.iter() {
-          result = result << 8;
-          result += *i as u32;
-        }
-        result
-    },
-    _ => panic!("error read_be_32")
-  }
 }
 
