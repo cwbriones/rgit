@@ -12,6 +12,7 @@ use remote::operations as remote_ops;
 mod remote;
 mod pack;
 mod reader;
+mod delta;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -28,14 +29,23 @@ fn main() {
     }
 }
 
-fn run_command(command: &String, _args: &[String]) -> i32 {
+fn run_command(command: &String, args: &[String]) -> i32 {
     match &command[..] {
         "test" => {
             match remote_ops::clone_priv("127.0.0.1", 9418, "rgit") {
                 Ok(_) => 0,
                 Err(_) => -1
             }
-        }
+        },
+        "test-delta" => {
+            if let [ref source, ref delta] = args {
+                delta::patch_file(&source[..], &delta[..]);
+                0
+            } else {
+                println!("incorrect number of arguments");
+                -1
+            }
+        },
         "ls-remote" => {
             remote_ops::ls_remote("127.0.0.1", 9418, "rgit")
         },
