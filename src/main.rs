@@ -1,4 +1,5 @@
-#![feature(io, fs)]
+#![feature(io)]
+#![feature(net)]
 #![feature(old_path)]
 #![feature(core)]
 #![feature(collections)]

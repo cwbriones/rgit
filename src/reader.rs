@@ -1,5 +1,5 @@
 use std::io;
-use std::io::{Read, ReadExt};
+use std::io::Read;
 
 pub trait MyReaderExt {
     fn read_byte(&mut self) -> io::Result<u8>;

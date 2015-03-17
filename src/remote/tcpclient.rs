@@ -1,12 +1,9 @@
 use reader::MyReaderExt;
 
-use std::{str, num};
-use std::net::{TcpStream,ToSocketAddrs};
-
 use std::io;
-use std::io::Write;
-
 use std::result::Result::Err;
+use std::net::TcpStream;
+use std::{str, num};
 
 // TODO:
 // receive_fully

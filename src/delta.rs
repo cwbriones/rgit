@@ -2,6 +2,8 @@
 use std::io::Read;
 use std::str as Str;
 
+use reader::MyReaderExt;
+
 // TODO: Ensure this isn't dependent on the std::old_io
 // implementation of Reader.
 
@@ -47,7 +49,7 @@ impl DeltaHeader {
         let mut count = 0;
 
         while (byte & 0x80) > 0 {
-            byte = delta.read_byte().unwrap() as usize;
+            byte = MyReaderExt::read_byte(delta).unwrap() as usize;
             size += (byte & 127) << (7 * count);
 
             count += 1;
@@ -102,7 +104,7 @@ impl<'a> DeltaPatcher<'a> {
     }
 
     fn next_command(&mut self) -> DeltaOp {
-        let cmd = self.delta.read_byte().unwrap();
+        let cmd = MyReaderExt::read_byte(&mut self.delta).unwrap();
 
         if cmd & 128 > 0 {
             let mut offset = 0usize;
@@ -112,7 +114,7 @@ impl<'a> DeltaPatcher<'a> {
             // Read the offset to copy from
             for &mask in [0x01, 0x02, 0x04, 0x08].iter() {
                 if cmd & mask > 0 {
-                    let byte = self.delta.read_byte().unwrap() as u64;
+                    let byte = MyReaderExt::read_byte(&mut self.delta).unwrap() as u64;
                     offset += (byte as usize) << shift;
                 }
                 shift += 8;
@@ -122,7 +124,7 @@ impl<'a> DeltaPatcher<'a> {
             shift = 0;
             for &mask in [0x10, 0x20, 0x40].iter() {
                 if cmd & mask > 0 {
-                    let byte = self.delta.read_byte().unwrap() as u64;
+                    let byte = MyReaderExt::read_byte(&mut self.delta).unwrap() as u64;
                     length += (byte << shift) as usize;
                 }
                 shift += 8;
@@ -143,7 +145,7 @@ impl<'a> DeltaPatcher<'a> {
             },
             DeltaOp::Insert(length) => {
                 // TODO: Shouldn't have to do another allocation here in the read
-                let items = self.delta.read_exact(length).unwrap();
+                let items = MyReaderExt::read_exact(&mut self.delta, length as u64).unwrap();
                 let mut buf = Vec::with_capacity(length);
                 buf.push_all(&items[..]);
                 buf

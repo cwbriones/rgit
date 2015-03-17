@@ -3,7 +3,7 @@ use reader::MyReaderExt;
 use flate2::read::ZlibDecoder;
 
 use std::fs::File;
-use std::io::{Read,ReadExt,Seek,Cursor};
+use std::io::{Read,Seek,Cursor};
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 

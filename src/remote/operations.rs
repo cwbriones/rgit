@@ -33,12 +33,12 @@ pub fn clone_priv(host: &str, port: u16, repo: &str) -> io::Result<()> {
     let (_refs, packfile) = try!(receive_packfile(host, port, repo));
 
     let dir = Path::new("temp_repo");
-    fs::create_dir(&dir);
+    let _ = fs::create_dir(&dir);
 
     let filepath = dir.join("pack_file_incoming");
 
     let mut file = File::create(&filepath).unwrap();
-    file.write_all(&packfile[..]);
+    let _ = file.write_all(&packfile[..]);
     file = File::open(&filepath).unwrap();
 
     let _parsed_packfile = PackFile::from_file(file);
