@@ -4,8 +4,10 @@
 #![feature(core)]
 #![feature(collections)]
 #![feature(exit_status)]
+
 extern crate getopts;
 extern crate flate2;
+extern crate crypto;
 
 use std::env;
 use remote::operations as remote_ops;
@@ -14,6 +16,7 @@ mod remote;
 mod pack;
 mod reader;
 mod delta;
+mod object;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

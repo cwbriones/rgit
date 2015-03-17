@@ -1,3 +1,5 @@
+use object::GitObject;
+use object::GitObjectType;
 use reader::MyReaderExt;
 
 use flate2::read::ZlibDecoder;
@@ -10,23 +12,7 @@ static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 pub struct PackFile {
     version: u32,
     num_objects: u32,
-    objects: Vec<PackfileObject>
-}
-
-pub struct PackfileObject {
-    obj_type: PackObjectType,
-    size: usize,
-    content: Vec<u8>
-}
-
-#[derive(Debug)]
-pub enum PackObjectType {
-    Commit,
-    Tree,
-    Blob,
-    Tag,
-    OfsDelta(u8),
-    RefDelta([u8; 20]),
+    objects: Vec<GitObject>
 }
 
 impl PackFile {
@@ -51,7 +37,7 @@ impl PackFile {
     }
 }
 
-fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<PackfileObject> {
+fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<GitObject> {
     let mut objects = Vec::with_capacity(num_objects as usize);
 
     let mut contents = Vec::new();
@@ -80,9 +66,8 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<PackfileObjec
 
       println!("object type {:?}", obj_type);
       let content = read_object_content(&mut cursor, size);
-      let obj = PackfileObject {
+      let obj = GitObject {
           obj_type: obj_type,
-          size: size,
           content: content
       };
       objects.push(obj);
@@ -110,21 +95,21 @@ fn read_object_content(in_data: &mut Cursor<Vec<u8>>, size: usize) -> Vec<u8> {
     content
 }
 
-fn read_object_type<R>(r: &mut R, id: u8) -> Option<PackObjectType> where R: Read {
+fn read_object_type<R>(r: &mut R, id: u8) -> Option<GitObjectType> where R: Read {
     match id {
-        1 => Some(PackObjectType::Commit),
-        2 => Some(PackObjectType::Tree),
-        3 => Some(PackObjectType::Blob),
-        4 => Some(PackObjectType::Tag),
+        1 => Some(GitObjectType::Commit),
+        2 => Some(GitObjectType::Tree),
+        3 => Some(GitObjectType::Blob),
+        4 => Some(GitObjectType::Tag),
         6 => {
-            Some(PackObjectType::OfsDelta(read_offset(r)))
+            Some(GitObjectType::OfsDelta(read_offset(r)))
         },
         7 => {
             let mut base: [u8; 20] = [0; 20];
             for i in 0..20 {
                 base[i] = r.read_byte().unwrap();
             }
-            Some(PackObjectType::RefDelta(base))
+            Some(GitObjectType::RefDelta(base))
         }
         _ => None
     }
