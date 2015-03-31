@@ -4,6 +4,7 @@
 #![feature(core)]
 #![feature(collections)]
 #![feature(exit_status)]
+#![feature(slice_patterns)]
 
 extern crate getopts;
 extern crate flate2;

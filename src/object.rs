@@ -1,10 +1,13 @@
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
+use flate2::read::ZlibDecoder;
 
 use std::fs;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read,Write};
+use std::io::Result as IoResult;
 use std::path::{Path, PathBuf};
+use std::str;
 
 use self::GitObjectType::*;
 
@@ -24,6 +27,35 @@ pub enum GitObjectType {
 }
 
 impl GitObject {
+    pub fn from_path(path: &Path) -> Self {
+        let sha1: String = {
+            let fst = path.parent().unwrap().to_str().unwrap();
+            let rst = path.file_name().unwrap().to_str().unwrap();
+            [fst, rst].concat()
+        };
+
+        let mut inflated = Vec::new();
+        let mut file = File::open(path).unwrap();
+        let mut z = ZlibDecoder::new(file);
+        z.read_to_end(&mut inflated);
+
+        let sha1_checksum = sha1_hash(&inflated);
+        assert_eq!(sha1_checksum, sha1);
+
+        let header_footer: Vec<&str> = str::from_utf8(&inflated[..]).unwrap().split('\0').collect();
+        if let [header, footer] = &header_footer[..] {
+            let (obj_type, size) = GitObject::parse_header(header);
+            assert_eq!(footer.len(), size);
+
+            GitObject {
+                obj_type: obj_type,
+                content: footer.bytes().collect()
+            }
+        } else {
+            panic!("erroneous file on disk")
+        }
+    }
+
     pub fn encode(&self) -> (String, Vec<u8>) {
         // encoding:
         // header ++ content
@@ -35,33 +67,56 @@ impl GitObject {
         }
     }
 
-    pub fn write_object(&self) {
+    pub fn sha(&self) -> String {
+        let (hash, _) = self.encode();
+        hash
+    }
+
+    pub fn write(&self) -> IoResult<()> {
         let (sha1, blob) = self.encode();
         let path = object_path(&sha1);
 
         fs::create_dir(path.parent().unwrap());
 
-        let mut file = File::create(&path).unwrap();
+        let file = try!(File::create(&path));
         let mut z = ZlibEncoder::new(file, Compression::Default);
-        z.write_all(&blob[..]).unwrap();
+        try!(z.write_all(&blob[..]));
+        Ok(())
+    }
+
+    fn parse_header(header: &str) -> (GitObjectType, usize) {
+        let split: Vec<&str> = header.split(' ').collect();
+        if let [t, s] = &split[..] {
+            let obj_type = match t {
+                "commit" => Commit,
+                "tree" => Tree,
+                "blob" => Blob,
+                "tag" => Tag,
+                _ => panic!("Unknown object type")
+            };
+            let size = 1;
+
+            (obj_type, size)
+        } else {
+            panic!("Unknown object type")
+        }
     }
 
     fn header(&self) -> Option<Vec<u8>> {
-        // header: 
+        // header:
         // "type size \0"
-        let num_type = match self.obj_type {
-            Commit => 1,
-            Tree => 2,
-            Blob => 3,
-            Tag => 4,
-            _ => 0
+        let str_type = match self.obj_type {
+            Commit => "commit",
+            Tree => "tree",
+            Blob => "blob",
+            Tag => "tag",
+            _ => ""
         };
-        match num_type {
-            0  => None,
+        match str_type {
+            ""  => None,
             _ => {
-                let s1 = num_type.to_string();
-                let s2 = self.content.len().to_string();
-                let res: String = [&s1[..], " ", &s2[..], "\0"].concat();
+                let str_size = self.content.len().to_string();
+                let res: String = [str_type, " ", &str_size[..], "\0"].concat();
                 Some(res.into_bytes())
             }
         }
@@ -69,7 +124,8 @@ impl GitObject {
 }
 
 fn object_path(sha: &String) -> PathBuf {
-    let mut path = PathBuf::new(&sha[..1]);
+    let mut path = PathBuf::new();
+    path.push(&sha[..1]);
     path.push(&sha[1..40]);
     path
 }

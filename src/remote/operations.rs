@@ -7,6 +7,8 @@ use std::fs::File;
 use std::io;
 use std::io::Write;
 
+use std::path;
+
 // --------------------------------------------
 // Receive Packfile algorithm:
 // --------------------------------------------
@@ -32,7 +34,7 @@ pub fn receive_packfile(host: &str, port: u16, repo: &str) -> io::Result<(Vec<Pa
 pub fn clone_priv(host: &str, port: u16, repo: &str) -> io::Result<()> {
     let (_refs, packfile) = try!(receive_packfile(host, port, repo));
 
-    let dir = Path::new("temp_repo");
+    let dir = path::Path::new("temp_repo");
     let _ = fs::create_dir(&dir);
 
     let filepath = dir.join("pack_file_incoming");
@@ -47,7 +49,7 @@ pub fn clone_priv(host: &str, port: u16, repo: &str) -> io::Result<()> {
 }
 
 #[derive(Debug)]
-enum PacketLine {
+pub enum PacketLine {
     FirstLine(String, String, Vec<String>),
     RefLine(String, String),
     LastLine

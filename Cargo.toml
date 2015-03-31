@@ -10,6 +10,8 @@ git = "https://github.com/DaGenix/rust-crypto.git"
 [dependencies.flate2]
 path = "../flate2"
 
+[dependencies.getopts]
+
 [[bin]]
 name = "rgit"
 
