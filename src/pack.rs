@@ -1,11 +1,15 @@
 use object::GitObject;
 use object::GitObjectType;
 use reader::MyReaderExt;
+use delta;
 
 use flate2::read::ZlibDecoder;
+use rustc_serialize::hex::ToHex;
 
 use std::fs::File;
 use std::io::{Read,Seek,Cursor};
+use std::io::Result as IoResult;
+use std::collections::HashMap;
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
@@ -22,8 +26,6 @@ impl PackFile {
         let version = file.read_be_u32().unwrap();
         let num_objects = file.read_be_u32().unwrap();
 
-        println!("magic: {}, vsn: {}, num_objects: {}", magic, version, num_objects);
-
         if magic == MAGIC_HEADER {
             let objects = read_packfile_objects(&mut file, num_objects);
             PackFile {
@@ -34,6 +36,43 @@ impl PackFile {
         } else {
           unreachable!("Packfile failed to parse");
         }
+    }
+
+    pub fn unpack_all(&self) -> IoResult<()> {
+        // Initial Pass, write main objects
+        // Accumulate unresolved deltas
+
+        let mut base_objects = HashMap::new();
+        let mut ref_deltas = Vec::new();
+
+        for object in self.objects.iter() {
+            match object.obj_type {
+                GitObjectType::RefDelta(base) => {
+                    let hex_base = base.to_hex();
+                    ref_deltas.push((hex_base, object));
+                },
+                GitObjectType::OfsDelta(_) => (),
+                _ => {
+                    let sha = object.sha();
+                    base_objects.insert(sha, object);
+                    object.write();
+                },
+            }
+        }
+
+        for &(ref base_sha, delta) in ref_deltas.iter() {
+            let base_object = GitObject::read_from_disk(base_sha);
+            let source = &base_object.content[..];
+
+            let patched = GitObject {
+                obj_type: base_object.obj_type,
+                content: delta::patch(source, &delta.content[..])
+            };
+            patched.write();
+        }
+
+        // Resolve deltas
+        Ok(())
     }
 }
 
@@ -64,7 +103,6 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<GitObject> {
           "Error parsing object type in packfile"
           );
 
-      println!("object type {:?}", obj_type);
       let content = read_object_content(&mut cursor, size);
       let obj = GitObject {
           obj_type: obj_type,

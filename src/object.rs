@@ -27,12 +27,8 @@ pub enum GitObjectType {
 }
 
 impl GitObject {
-    pub fn from_path(path: &Path) -> Self {
-        let sha1: String = {
-            let fst = path.parent().unwrap().to_str().unwrap();
-            let rst = path.file_name().unwrap().to_str().unwrap();
-            [fst, rst].concat()
-        };
+    pub fn read_from_disk(sha1: &str) -> Self {
+        let path = object_path(sha1);
 
         let mut inflated = Vec::new();
         let mut file = File::open(path).unwrap();
@@ -42,17 +38,18 @@ impl GitObject {
         let sha1_checksum = sha1_hash(&inflated);
         assert_eq!(sha1_checksum, sha1);
 
-        let header_footer: Vec<&str> = str::from_utf8(&inflated[..]).unwrap().split('\0').collect();
-        if let [header, footer] = &header_footer[..] {
-            let (obj_type, size) = GitObject::parse_header(header);
-            assert_eq!(footer.len(), size);
+        let split_idx = inflated.iter().position(|x| *x == 0).unwrap();
+        let header = str::from_utf8(&inflated[..split_idx]).unwrap();
+        let (obj_type, size) = GitObject::parse_header(header);
 
-            GitObject {
-                obj_type: obj_type,
-                content: footer.bytes().collect()
-            }
-        } else {
-            panic!("erroneous file on disk")
+        let mut footer = Vec::new();
+        footer.push_all(&inflated[split_idx+1..]);
+
+        assert_eq!(footer.len(), size);
+
+        GitObject {
+            obj_type: obj_type,
+            content: footer
         }
     }
 
@@ -94,7 +91,7 @@ impl GitObject {
                 "tag" => Tag,
                 _ => panic!("Unknown object type")
             };
-            let size = 1;
+            let size = s.parse::<usize>().unwrap();
 
             (obj_type, size)
         } else {
@@ -123,10 +120,10 @@ impl GitObject {
     }
 }
 
-fn object_path(sha: &String) -> PathBuf {
+fn object_path(sha: &str) -> PathBuf {
     let mut path = PathBuf::new();
-    path.push(&sha[..1]);
-    path.push(&sha[1..40]);
+    path.push(&sha[..2]);
+    path.push(&sha[2..40]);
     path
 }
 

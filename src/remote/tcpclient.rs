@@ -55,7 +55,7 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> io::Result<Vec<u8>> {
                         let msg = str::from_utf8(msg_bytes).unwrap();
                         print!("{}", msg);
                     }
-                    _ => return Err(io::Error::new(io::ErrorKind::Other, "Git server returned error", None))
+                    _ => return Err(io::Error::new(io::ErrorKind::Other, "Git server returned error"))
                 }
             }
             None => return Ok(packfile_data)

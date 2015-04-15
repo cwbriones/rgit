@@ -7,6 +7,11 @@ use reader::MyReaderExt;
 // TODO: Ensure this isn't dependent on the std::old_io
 // implementation of Reader.
 
+pub fn patch(source: &[u8], delta: &[u8]) -> Vec<u8> {
+    let mut patcher = DeltaPatcher::new(source, delta);
+    patcher.run_to_end()
+}
+
 pub fn patch_file(source_path: &str, delta_path: &str) {
     use std::fs::File;
 

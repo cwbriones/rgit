@@ -31,19 +31,28 @@ pub fn receive_packfile(host: &str, port: u16, repo: &str) -> io::Result<(Vec<Pa
     })
 }
 
-pub fn clone_priv(host: &str, port: u16, repo: &str) -> io::Result<()> {
-    let (_refs, packfile) = try!(receive_packfile(host, port, repo));
+pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()> {
+    use std::env;
 
-    let dir = path::Path::new("temp_repo");
-    let _ = fs::create_dir(&dir);
+    let (_refs, packfile_data) = try!(receive_packfile(host, port, repo));
 
-    let filepath = dir.join("pack_file_incoming");
+    let mut p = path::PathBuf::new();
+    p.push(dir);
+    p.push(".git");
+    p.push("objects");
+
+    try!(fs::create_dir_all(&p));
+    try!(env::set_current_dir(&p));
+
+    let filepath = path::Path::new("./pack");
 
     let mut file = File::create(&filepath).unwrap();
-    let _ = file.write_all(&packfile[..]);
+    let _ = file.write_all(&packfile_data[..]);
     file = File::open(&filepath).unwrap();
 
-    let _parsed_packfile = PackFile::from_file(file);
+    let parsed_packfile = PackFile::from_file(file);
+    parsed_packfile.unpack_all();
+
     // checkout head
     Ok(())
 }

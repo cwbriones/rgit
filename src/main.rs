@@ -9,6 +9,7 @@
 extern crate getopts;
 extern crate flate2;
 extern crate crypto;
+extern crate rustc_serialize;
 
 use std::env;
 use remote::operations as remote_ops;
@@ -35,11 +36,23 @@ fn main() {
 }
 
 fn run_command(command: &String, args: &[String]) -> i32 {
+    let argc = args.len();
     match &command[..] {
-        "test" => {
-            match remote_ops::clone_priv("127.0.0.1", 9418, "rgit") {
-                Ok(_) => 0,
-                Err(_) => -1
+        "clone" => {
+            if 0 < argc && argc <= 2 {
+                let repo = &args[0];
+                let dir = if args.len() == 2 {
+                    &args[1]
+                } else {
+                    repo
+                };
+                match remote_ops::clone_priv("127.0.0.1", 9418, repo, dir) {
+                    Ok(_) => 0,
+                    Err(_) => -1
+                }
+            } else {
+                println!("incorrect number of arguments");
+                -1
             }
         },
         "test-delta" => {

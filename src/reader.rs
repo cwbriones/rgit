@@ -10,7 +10,7 @@ pub trait MyReaderExt {
 impl<R:Read> MyReaderExt for R {
 
     fn read_byte(&mut self) -> io::Result<u8> {
-        try!(self.bytes().next().ok_or(io::Error::new(io::ErrorKind::Other, "EOF", None)))
+        try!(self.bytes().next().ok_or(io::Error::new(io::ErrorKind::Other, "EOF")))
     }
 
     fn read_exact(&mut self, n: u64) -> io::Result<Vec<u8>> {
