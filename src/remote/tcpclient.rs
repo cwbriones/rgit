@@ -3,7 +3,7 @@ use reader::MyReaderExt;
 use std::io;
 use std::result::Result::Err;
 use std::net::TcpStream;
-use std::{str, num};
+use std::str;
 
 // TODO:
 // receive_fully
@@ -47,12 +47,16 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> io::Result<Vec<u8>> {
                 if &line[..] == "NAK\n".as_bytes() {
                     continue;
                 }
-                match &line[..] {
-                    [1, _..] => {
-                        packfile_data.push_all(&line[1..])
+                match line[0] {
+                    1 => {
+                        // TODO: This only uses a loop because Vec::push_all was
+                        // not stabilized for Rust 1.0
+                        for i in &line[1..] {
+                            packfile_data.push(*i)
+                        }
                     }
-                    [2, msg_bytes..] => {
-                        let msg = str::from_utf8(msg_bytes).unwrap();
+                    2 => {
+                        let msg = str::from_utf8(&line[1..]).unwrap();
                         print!("{}", msg);
                     }
                     _ => return Err(io::Error::new(io::ErrorKind::Other, "Git server returned error"))
@@ -67,7 +71,7 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> io::Result<Vec<u8>> {
 fn read_packet_line(socket: &mut TcpStream) -> io::Result<Option<Vec<u8>>> {
     let header = try!(socket.read_exact(4u64));
     let length_str = str::from_utf8(&header[..]).unwrap();
-    let length: u64 = num::from_str_radix(length_str, 16).unwrap();
+    let length = u64::from_str_radix(length_str, 16).unwrap();
 
     if length > 4 {
         let pkt = try!(socket.read_exact(length - 4));

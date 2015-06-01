@@ -51,7 +51,7 @@ pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()
     file = File::open(&filepath).unwrap();
 
     let parsed_packfile = PackFile::from_file(file);
-    parsed_packfile.unpack_all();
+    parsed_packfile.unpack_all().ok().expect("Error unpacking parsed packfile");
 
     // checkout head
     Ok(())
@@ -158,22 +158,29 @@ pub fn parse_line(line: &str) -> PacketLine {
         .split('\0')
         .collect::<Vec<_>>();
 
-    match &split_str[..] {
-        [object_ref, capabilities] => {
+    match split_str.len() {
+        1 => {
+            let object_ref = split_str[0];
             let v = object_ref.split(' ').collect::<Vec<_>>();
-            let c = capabilities.split(' ').map(|s| s.to_string()).collect::<Vec<_>>();
-            match &v[..] {
-                [ref obj_id, ref r] => PacketLine::FirstLine(obj_id.to_string(), r.to_string(), c),
-                _ => PacketLine::LastLine
+            if v.len() == 2 {
+                let (obj_id, r) = (v[0], v[1]);
+                PacketLine::RefLine(obj_id.to_string(), r.to_string())
+            } else {
+                PacketLine::LastLine
             }
         },
-        [object_ref] => {
+        2 => {
+            let object_ref = split_str[0];
+            let capabilities = split_str[1];
             let v = object_ref.split(' ').collect::<Vec<_>>();
-            match &v[..] {
-                [obj_id, r] => PacketLine::RefLine(obj_id.to_string(), r.to_string()),
-                _ => PacketLine::LastLine
+            let c = capabilities.split(' ').map(|s| s.to_string()).collect::<Vec<_>>();
+            if v.len() == 2 {
+                let (obj_id, r) = (v[0], v[1]);
+                PacketLine::FirstLine(obj_id.to_string(), r.to_string(), c)
+            } else {
+                PacketLine::LastLine
             }
-        }
+        },
         _ => panic!("error parsing packetline")
     }
 }

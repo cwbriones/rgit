@@ -1,11 +1,3 @@
-#![feature(io)]
-#![feature(net)]
-#![feature(old_path)]
-#![feature(core)]
-#![feature(collections)]
-#![feature(exit_status)]
-#![feature(slice_patterns)]
-
 extern crate getopts;
 extern crate flate2;
 extern crate crypto;
@@ -25,7 +17,7 @@ fn main() {
 
     if args.len() > 1 {
         let status_code = run_command(&args[1], &args[2..]);
-        env::set_exit_status(status_code);
+        std::process::exit(status_code)
     } else {
         let usage =
             "usage: rgit <command> [<args>]\n\n\
@@ -56,7 +48,8 @@ fn run_command(command: &String, args: &[String]) -> i32 {
             }
         },
         "test-delta" => {
-            if let [ref source, ref delta] = args {
+            if argc == 2 {
+                let (source, delta) = (&args[0], &args[1]);
                 delta::patch_file(&source[..], &delta[..]);
                 0
             } else {

@@ -13,6 +13,8 @@ use std::collections::HashMap;
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
+// The fields version and num_objects are currently unused
+#[allow(dead_code)]
 pub struct PackFile {
     version: u32,
     num_objects: u32,
@@ -55,7 +57,9 @@ impl PackFile {
                 _ => {
                     let sha = object.sha();
                     base_objects.insert(sha, object);
-                    object.write();
+                    object.write()
+                      .ok()
+                      .expect("Error writing object to disk");
                 },
             }
         }
@@ -68,7 +72,9 @@ impl PackFile {
                 obj_type: base_object.obj_type,
                 content: delta::patch(source, &delta.content[..])
             };
-            patched.write();
+            patched.write()
+              .ok()
+              .expect("Error writing decoded object to disk");
         }
 
         // Resolve deltas

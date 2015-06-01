@@ -6,7 +6,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{Read,Write};
 use std::io::Result as IoResult;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str;
 
 use self::GitObjectType::*;
@@ -31,19 +31,21 @@ impl GitObject {
         let path = object_path(sha1);
 
         let mut inflated = Vec::new();
-        let mut file = File::open(path).unwrap();
+        let file = File::open(path).unwrap();
         let mut z = ZlibDecoder::new(file);
-        z.read_to_end(&mut inflated);
+        z.read_to_end(&mut inflated).ok().expect("Error inflating object");
 
         let sha1_checksum = sha1_hash(&inflated);
         assert_eq!(sha1_checksum, sha1);
 
         let split_idx = inflated.iter().position(|x| *x == 0).unwrap();
-        let header = str::from_utf8(&inflated[..split_idx]).unwrap();
-        let (obj_type, size) = GitObject::parse_header(header);
+        let (obj_type, size) = {
+            let header = str::from_utf8(&inflated[..split_idx]).unwrap();
+            GitObject::parse_header(header)
+        };
 
         let mut footer = Vec::new();
-        footer.push_all(&inflated[split_idx+1..]);
+        footer.extend(inflated.into_iter().skip(split_idx+1));
 
         assert_eq!(footer.len(), size);
 
@@ -57,7 +59,11 @@ impl GitObject {
         // encoding:
         // header ++ content
         if let Some(mut blob) = self.header() {
-            blob.push_all(&self.content[..]);
+            // TODO: Update since this was because I couldn't use 
+            // Vec::extend or push_all
+            for c in self.content.iter() {
+                blob.push(*c)
+            }
             (sha1_hash(&blob[..]), blob)
         } else {
             unreachable!("Tried to write an object type that was not Tree, Commit, Blob, or Tag")
@@ -73,7 +79,9 @@ impl GitObject {
         let (sha1, blob) = self.encode();
         let path = object_path(&sha1);
 
-        fs::create_dir(path.parent().unwrap());
+        fs::create_dir(path.parent().unwrap())
+          .ok()
+          .expect("Error creating directory to write objects");
 
         let file = try!(File::create(&path));
         let mut z = ZlibEncoder::new(file, Compression::Default);
@@ -83,7 +91,8 @@ impl GitObject {
 
     fn parse_header(header: &str) -> (GitObjectType, usize) {
         let split: Vec<&str> = header.split(' ').collect();
-        if let [t, s] = &split[..] {
+        if split.len() == 2 {
+            let (t, s) = (split[0], split[1]);
             let obj_type = match t {
                 "commit" => Commit,
                 "tree" => Tree,
