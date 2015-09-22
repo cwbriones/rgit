@@ -1,5 +1,5 @@
 use remote::tcpclient;
-use pack::PackFile;
+use packfile::PackFile;
 
 use std::fs;
 use std::fs::File;

@@ -9,15 +9,15 @@ use std::io::Result as IoResult;
 use std::path::PathBuf;
 use std::str;
 
-use self::GitObjectType::*;
+use self::ObjectType::*;
 
-pub struct GitObject {
-    pub obj_type: GitObjectType,
+pub struct Object {
+    pub obj_type: ObjectType,
     pub content: Vec<u8>
 }
 
 #[derive(Debug)]
-pub enum GitObjectType {
+pub enum ObjectType {
     Commit,
     Tree,
     Blob,
@@ -26,7 +26,7 @@ pub enum GitObjectType {
     RefDelta([u8; 20]),
 }
 
-impl GitObject {
+impl Object {
     pub fn read_from_disk(sha1: &str) -> Self {
         let path = object_path(sha1);
 
@@ -41,7 +41,7 @@ impl GitObject {
         let split_idx = inflated.iter().position(|x| *x == 0).unwrap();
         let (obj_type, size) = {
             let header = str::from_utf8(&inflated[..split_idx]).unwrap();
-            GitObject::parse_header(header)
+            Object::parse_header(header)
         };
 
         let mut footer = Vec::new();
@@ -49,7 +49,7 @@ impl GitObject {
 
         assert_eq!(footer.len(), size);
 
-        GitObject {
+        Object {
             obj_type: obj_type,
             content: footer
         }
@@ -89,7 +89,7 @@ impl GitObject {
         Ok(())
     }
 
-    fn parse_header(header: &str) -> (GitObjectType, usize) {
+    fn parse_header(header: &str) -> (ObjectType, usize) {
         let split: Vec<&str> = header.split(' ').collect();
         if split.len() == 2 {
             let (t, s) = (split[0], split[1]);

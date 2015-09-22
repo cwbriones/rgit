@@ -10,11 +10,10 @@ use std::env;
 use remote::operations as remote_ops;
 
 mod remote;
-mod pack;
+mod packfile;
+mod store;
 mod reader;
 mod delta;
-mod object;
-mod commit;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

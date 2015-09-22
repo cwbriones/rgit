@@ -1,8 +1,8 @@
-use object::GitObject;
-
 use nom::{IResult, Err, rest, newline, line_ending};
 
 use std::str;
+
+use packfile;
 
 type SHA = String;
 
@@ -24,7 +24,7 @@ pub struct Commit {
 }
 
 impl Commit {
-    fn from_raw_object(raw: GitObject) -> Option<Self> {
+    fn from_packfile_object(raw: packfile::Object) -> Option<Self> {
         if let IResult::Done(_, raw_parts) = parse_commit_inner(&raw.content[..]) {
             let (tree, parents, author, committer, message) = raw_parts;
             Some(Commit {

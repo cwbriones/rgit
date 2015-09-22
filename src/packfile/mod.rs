@@ -1,10 +1,11 @@
-use object::GitObject;
-use object::GitObjectType;
 use reader::MyReaderExt;
 use delta;
 
 use flate2::read::ZlibDecoder;
 use rustc_serialize::hex::ToHex;
+
+pub use self::object::Object;
+pub use self::object::ObjectType;
 
 use std::fs::File;
 use std::io::{Read,Seek,Cursor};
@@ -13,12 +14,14 @@ use std::collections::HashMap;
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
+mod object;
+
 // The fields version and num_objects are currently unused
 #[allow(dead_code)]
 pub struct PackFile {
     version: u32,
     num_objects: u32,
-    objects: Vec<GitObject>
+    objects: Vec<Object>
 }
 
 impl PackFile {
@@ -49,11 +52,11 @@ impl PackFile {
 
         for object in self.objects.iter() {
             match object.obj_type {
-                GitObjectType::RefDelta(base) => {
+                ObjectType::RefDelta(base) => {
                     let hex_base = base.to_hex();
                     ref_deltas.push((hex_base, object));
                 },
-                GitObjectType::OfsDelta(_) => (),
+                ObjectType::OfsDelta(_) => (),
                 _ => {
                     let sha = object.sha();
                     base_objects.insert(sha, object);
@@ -65,10 +68,10 @@ impl PackFile {
         }
 
         for &(ref base_sha, delta) in ref_deltas.iter() {
-            let base_object = GitObject::read_from_disk(base_sha);
+            let base_object = Object::read_from_disk(base_sha);
             let source = &base_object.content[..];
 
-            let patched = GitObject {
+            let patched = Object {
                 obj_type: base_object.obj_type,
                 content: delta::patch(source, &delta.content[..])
             };
@@ -82,7 +85,7 @@ impl PackFile {
     }
 }
 
-fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<GitObject> {
+fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<Object> {
     let mut objects = Vec::with_capacity(num_objects as usize);
 
     let mut contents = Vec::new();
@@ -110,7 +113,7 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<GitObject> {
           );
 
       let content = read_object_content(&mut cursor, size);
-      let obj = GitObject {
+      let obj = Object {
           obj_type: obj_type,
           content: content
       };
@@ -139,21 +142,21 @@ fn read_object_content(in_data: &mut Cursor<Vec<u8>>, size: usize) -> Vec<u8> {
     content
 }
 
-fn read_object_type<R>(r: &mut R, id: u8) -> Option<GitObjectType> where R: Read {
+fn read_object_type<R>(r: &mut R, id: u8) -> Option<ObjectType> where R: Read {
     match id {
-        1 => Some(GitObjectType::Commit),
-        2 => Some(GitObjectType::Tree),
-        3 => Some(GitObjectType::Blob),
-        4 => Some(GitObjectType::Tag),
+        1 => Some(ObjectType::Commit),
+        2 => Some(ObjectType::Tree),
+        3 => Some(ObjectType::Blob),
+        4 => Some(ObjectType::Tag),
         6 => {
-            Some(GitObjectType::OfsDelta(read_offset(r)))
+            Some(ObjectType::OfsDelta(read_offset(r)))
         },
         7 => {
             let mut base: [u8; 20] = [0; 20];
             for i in 0..20 {
                 base[i] = r.read_byte().unwrap();
             }
-            Some(GitObjectType::RefDelta(base))
+            Some(ObjectType::RefDelta(base))
         }
         _ => None
     }
