@@ -3,6 +3,9 @@ extern crate flate2;
 extern crate crypto;
 extern crate rustc_serialize;
 
+#[macro_use]
+extern crate nom;
+
 use std::env;
 use remote::operations as remote_ops;
 
@@ -11,6 +14,7 @@ mod pack;
 mod reader;
 mod delta;
 mod object;
+mod commit;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

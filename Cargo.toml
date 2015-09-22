@@ -4,14 +4,14 @@ name = "rgit"
 version = "0.0.1"
 authors = ["Christian Briones <christian@gmail.com>"]
 
-[dependencies.rust-crypto]
-git = "https://github.com/DaGenix/rust-crypto.git"
-
 [dependencies.flate2]
 path = "../flate2"
 
-[dependencies.getopts]
-[dependencies.rustc-serialize]
+[dependencies]
+getopts = "*"
+rust-crypto = "*"
+rustc-serialize = "*"
+nom = "*"
 
 [[bin]]
 name = "rgit"
