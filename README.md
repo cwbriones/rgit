@@ -6,15 +6,15 @@ This project is a primarily a product of the excellent article
 
 Hopefully by the end of this you should be able to successfully run the following to create a valid git repo:
 ```bash
-rgit clone https://github.com/cwbriones/rgit
+rgit clone git://github.com/cwbriones/rgit.git
 ```
 
 ## Todo
-- Transport Protocol and Pack Wire Protocol
+- [x] Transport Protocol and Pack Wire Protocol
   - [x] Reference Discovery (ls-remote)
-  - [ ] Capabilities
-  - [ ] Packfile Negotiation
-- [ ] Delta Encoding
+  - [x] Capabilities
+  - [x] Packfile Negotiation
+- [x] Delta Encoding
 - [ ] Repo and Object Storage Format
 - [ ] Refs
 - [ ] Working Copy and Index
