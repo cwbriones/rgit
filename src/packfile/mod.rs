@@ -15,6 +15,7 @@ use std::collections::HashMap;
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
 mod object;
+mod refs;
 
 // The fields version and num_objects are currently unused
 #[allow(dead_code)]

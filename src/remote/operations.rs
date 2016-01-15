@@ -34,7 +34,7 @@ pub fn receive_packfile(host: &str, port: u16, repo: &str) -> io::Result<(Vec<Pa
 pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()> {
     use std::env;
 
-    let (_refs, packfile_data) = try!(receive_packfile(host, port, repo));
+    let (refs, packfile_data) = try!(receive_packfile(host, port, repo));
 
     let mut p = path::PathBuf::new();
     p.push(dir);
@@ -57,6 +57,10 @@ pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()
     Ok(())
 }
 
+// FIXME: This is poorly designed. The receiver should receive on an Optional
+// since LastLine is representing this special sentinel value. The capabilities
+// shouldn't be tied to the structure since they are only returned in the initial
+// response.
 #[derive(Debug)]
 pub enum PacketLine {
     FirstLine(String, String, Vec<String>),
