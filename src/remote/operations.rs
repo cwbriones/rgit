@@ -68,6 +68,8 @@ pub enum PacketLine {
     LastLine
 }
 
+pub struct Refline(String, String);
+
 // Encodes a packet-line for communcation.
 fn pktline(msg: &str) -> String {
     format!("{:04x}{}", 4 + msg.len() as u8, msg)

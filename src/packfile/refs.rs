@@ -36,12 +36,12 @@ fn write_refs(path: &str, refs: &Vec<&GitRef>) -> IoResult<()> {
 
 fn update_head(refs: &Vec<&GitRef>) {
     if let Some(head) = refs.iter().find(|r| r.name == "HEAD") {
-        let sha1 = head.id.as_str();
-        let true_ref = refs.iter().find(|r| r.name != "HEAD" && r.id == sha1);
-        let dir: &str = true_ref
-            .map(|r| r.name.as_str())
+        let sha1 = &head.id;
+        let true_ref = refs.iter().find(|r| r.name != "HEAD" && r.id == *sha1);
+        let dir = true_ref
+            .map(|r| &r.name[..])
             .unwrap_or("refs/heads/master");
-        create_ref(dir, sha1);
+        create_ref(dir, &sha1);
         create_sym_ref("HEAD", dir); 
     }
 }
