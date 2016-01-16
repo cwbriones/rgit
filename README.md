@@ -16,6 +16,6 @@ rgit clone git://github.com/cwbriones/rgit.git
   - [x] Packfile Negotiation
 - [x] Delta Encoding
 - [x] Repo and Object Storage Format
-- [ ] Refs
+- [x] Refs
 - [ ] Working Copy and Index
 - [ ] Clone Command
