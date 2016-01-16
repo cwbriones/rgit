@@ -27,11 +27,11 @@ pub enum ObjectType {
 }
 
 impl Object {
-    pub fn read_from_disk(sha1: &str) -> Self {
+    pub fn read_from_disk(sha1: &str) -> IoResult<Self> {
         let path = object_path(sha1);
 
         let mut inflated = Vec::new();
-        let file = File::open(path).unwrap();
+        let file = try!(File::open(path));
         let mut z = ZlibDecoder::new(file);
         z.read_to_end(&mut inflated).ok().expect("Error inflating object");
 
@@ -49,10 +49,10 @@ impl Object {
 
         assert_eq!(footer.len(), size);
 
-        Object {
+        Ok(Object {
             obj_type: obj_type,
             content: footer
-        }
+        })
     }
 
     pub fn encode(&self) -> (String, Vec<u8>) {
@@ -79,7 +79,7 @@ impl Object {
         let (sha1, blob) = self.encode();
         let path = object_path(&sha1);
 
-        fs::create_dir(path.parent().unwrap())
+        fs::create_dir_all(path.parent().unwrap())
           .ok()
           .expect("Error creating directory to write objects");
 

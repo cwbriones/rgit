@@ -5,11 +5,11 @@ use std::fs::File;
 use std::path::PathBuf;
 
 pub struct GitRef {
-    id: String,
-    name: String
+    pub id: String,
+    pub name: String,
 }
 
-fn create_refs(refs: Vec<GitRef>) {
+pub fn create_refs(refs: Vec<GitRef>) {
     let filtered = refs.iter().filter(|r| r.name.ends_with("^{}"));
     let (tags, branches): (Vec<_>, Vec<_>) = refs.iter().partition(|r| {
         r.name.starts_with("refs/tags")
@@ -19,17 +19,18 @@ fn create_refs(refs: Vec<GitRef>) {
     write_refs("refs/tags", &tags);
 }
 
-fn write_refs(path: &str, refs: &Vec<&GitRef>) -> IoResult<()> {
-    let mut p = PathBuf::new();
-    p.push(".git");
-    p.push(path);
-
-    try!(fs::create_dir_all(&p));
+fn write_refs(parent_path: &str, refs: &Vec<&GitRef>) -> IoResult<()> {
+    let mut path = PathBuf::new();
+    path.push("foobar/.git");
+    path.push(parent_path);
 
     for r in refs {
-        let mut qualified_path = p.clone();
+        let mut qualified_path = path.clone();
         qualified_path.push(&r.name);
-        let mut file = File::create(qualified_path);
+
+        try!(fs::create_dir_all(&qualified_path));
+        let mut file = try!(File::create(qualified_path));
+        try!(file.write_all(r.id.as_bytes()));
     }
     Ok(())
 }
@@ -46,11 +47,16 @@ fn update_head(refs: &Vec<&GitRef>) {
     }
 }
 
+///
+/// Creates a symbolic ref in the given repository.
+///
 fn create_ref(name: &str, the_ref: &str) -> IoResult<()> {
     Ok(())
 }
 
+///
 /// Creates a symbolic ref in the given repository.
+///
 fn create_sym_ref(name: &str, the_ref: &str) -> IoResult<()> {
     Ok(())
 }

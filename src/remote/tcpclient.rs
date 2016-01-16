@@ -5,12 +5,10 @@ use std::result::Result::Err;
 use std::net::TcpStream;
 use std::str;
 
-// TODO:
-// receive_fully
-// send
-
+///
 /// Reads and parses packet-lines from the given connection
 /// until a null packet is received.
+///
 pub fn receive(socket: &mut TcpStream) -> io::Result<Vec<String>> {
     let mut lines = vec![];
     loop {
@@ -25,6 +23,9 @@ pub fn receive(socket: &mut TcpStream) -> io::Result<Vec<String>> {
     }
 }
 
+///
+/// Helper for opening a `TcpStream` connection and performing an action with the socket.
+///
 pub fn with_connection<T, K>(host: &str, port: u16, consumer: K) -> io::Result<T>
     where K: Fn(&mut TcpStream) -> io::Result<T>
 {
@@ -32,13 +33,16 @@ pub fn with_connection<T, K>(host: &str, port: u16, consumer: K) -> io::Result<T
     consumer(&mut sock)
 }
 
+///
 /// Receives a multiplexed response from the git server.
 /// The mulitplexing protocol encodes channel information as the first
-/// byte returned with each reponse packetline,
+/// byte returned with each reponse packetline.
+///
 /// There are three channels:
 ///    1. Packetfile data
 ///    2. Progress information to be printed to STDERR
 ///    3. Error message from server, abort operation
+///
 pub fn receive_with_sideband(socket: &mut TcpStream) -> io::Result<Vec<u8>> {
     let mut packfile_data = Vec::new();
     loop {
@@ -67,7 +71,9 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> io::Result<Vec<u8>> {
     }
 }
 
+///
 /// Reads and parses a packet-line from the server.
+///
 fn read_packet_line(socket: &mut TcpStream) -> io::Result<Option<Vec<u8>>> {
     let header = try!(socket.read_exact(4u64));
     let length_str = str::from_utf8(&header[..]).unwrap();

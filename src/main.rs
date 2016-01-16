@@ -61,7 +61,13 @@ fn run_command(command: &String, args: &[String]) -> i32 {
             }
         },
         "ls-remote" => {
-            remote_ops::ls_remote("127.0.0.1", 9418, "rgit")
+            if argc == 1 {
+                let repo = &args[0];
+                remote_ops::ls_remote("127.0.0.1", 9418, repo)
+            } else {
+                println!("incorrect number of arguments");
+                -1
+            }
         },
         unknown => {
             println!("Unknown command: {}", unknown);

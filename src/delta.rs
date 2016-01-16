@@ -26,7 +26,7 @@ pub fn patch_file(source_path: &str, delta_path: &str) {
 
     let mut patcher = DeltaPatcher::new(&source_contents[..], &delta_contents[..]);
     let res = patcher.run_to_end();
-    println!("{}", Str::from_utf8(&res[..]).unwrap());
+    print!("{}", Str::from_utf8(&res[..]).unwrap());
 }
 
 #[derive(Debug)]
@@ -95,6 +95,7 @@ impl<'a> DeltaPatcher<'a> {
                 break;
             }
         }
+        assert_eq!(result.len(), self.target_len);
         result
     }
 
@@ -143,17 +144,12 @@ impl<'a> DeltaPatcher<'a> {
     fn run_command(&mut self, command: DeltaOp) -> Vec<u8> {
         match command {
             DeltaOp::Copy(start, length) => {
-                let end = start + length;
                 // TODO: This was a quick fix since push_all was not stable for
                 // Rust 1.0
-                self.source.iter().skip(start).take(end).map(|x|{ *x }).collect()
+                self.source.iter().skip(start).take(length).map(|x|{ *x }).collect()
             },
             DeltaOp::Insert(length) => {
-                // TODO: Shouldn't have to do another allocation here in the read
-                let items = MyReaderExt::read_exact(&mut self.delta, length as u64).unwrap();
-                let mut buf = Vec::with_capacity(length);
-                buf.extend(items.into_iter());
-                buf
+                MyReaderExt::read_exact(&mut self.delta, length as u64).unwrap()
             }
         }
     }

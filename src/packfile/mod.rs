@@ -14,8 +14,8 @@ use std::collections::HashMap;
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
+pub mod refs;
 mod object;
-mod refs;
 
 // The fields version and num_objects are currently unused
 #[allow(dead_code)]
@@ -51,7 +51,7 @@ impl PackFile {
         let mut base_objects = HashMap::new();
         let mut ref_deltas = Vec::new();
 
-        for object in self.objects.iter() {
+        for object in &self.objects {
             match object.obj_type {
                 ObjectType::RefDelta(base) => {
                     let hex_base = base.to_hex();
@@ -68,18 +68,22 @@ impl PackFile {
             }
         }
 
-        for &(ref base_sha, delta) in ref_deltas.iter() {
-            let base_object = Object::read_from_disk(base_sha);
+        let total = ref_deltas.len();
+        for (i, &(ref base_sha, delta)) in ref_deltas.iter().enumerate() {
+            let base_object = try!(Object::read_from_disk(base_sha));
             let source = &base_object.content[..];
 
             let patched = Object {
                 obj_type: base_object.obj_type,
                 content: delta::patch(source, &delta.content[..])
             };
+            let percentage = (100.0 * ((i + 1) as f32) / (total as f32)) as usize;
+            print!("Resolving deltas: {}% ({}/{})\r", percentage, i + 1, total);
             patched.write()
               .ok()
               .expect("Error writing decoded object to disk");
         }
+        println!("\nDone unpacking.");
 
         // Resolve deltas
         Ok(())
