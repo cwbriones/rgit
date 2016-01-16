@@ -131,6 +131,7 @@ impl Object {
 
 fn object_path(sha: &str) -> PathBuf {
     let mut path = PathBuf::new();
+    path.push("objects");
     path.push(&sha[..2]);
     path.push(&sha[2..40]);
     path

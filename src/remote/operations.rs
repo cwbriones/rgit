@@ -43,7 +43,6 @@ pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()
     let mut p = path::PathBuf::new();
     p.push(dir);
     p.push(".git");
-    p.push("objects");
 
     try!(fs::create_dir_all(&p));
     try!(env::set_current_dir(&p));
@@ -62,7 +61,8 @@ pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()
             panic!("Error unpacking parsed packfile");
         }
     }
-    refs::create_refs(refs);
+    try!(refs::create_refs(&refs));
+    refs::update_head(&refs);
 
     // Checkout head and format refs
     Ok(())
