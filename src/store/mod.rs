@@ -17,24 +17,19 @@ use self::commit::Commit;
 /// of the repository.
 ///
 pub fn checkout_head(repo: &str) -> IoResult<()> {
-    println!("Checking out head");
     let tip = try!(read_sym_ref(repo, "HEAD"));
-    println!("Head is {}", tip);
     walk(repo, &tip).and_then(|t| walk_tree(repo, repo, &t).ok());
     // Need to write the index
     Ok(())
 }
 
 fn walk(repo: &str, sha: &str) -> Option<Tree> {
-    println!("walking object {}", sha);
     Object::read_from_disk(repo, sha).ok().and_then(|object| {
         match object.obj_type {
             ObjectType::Commit => {
-                println!("object is commit, extracting tree");
                 Commit::from_packfile_object(object).and_then(|c| extract_tree(repo, &c))
             },
             ObjectType::Tree => {
-                println!("object is tree, parsing");
                 Tree::from_packfile_object(object)
             },
             _ => None
@@ -43,7 +38,6 @@ fn walk(repo: &str, sha: &str) -> Option<Tree> {
 }
 
 fn walk_tree(repo: &str, parent: &str, tree: &Tree) -> IoResult<()> {
-    println!("walking tree at {}", parent);
     for entry in &tree.entries {
         let &TreeEntry {
             ref path, 
@@ -57,14 +51,12 @@ fn walk_tree(repo: &str, parent: &str, tree: &Tree) -> IoResult<()> {
             EntryMode::SubDirectory => {
                 try!(fs::create_dir_all(&full_path));
                 let path_str = full_path.to_str().unwrap();
-                println!("Tree entry: {}", path_str);
                 walk(repo, sha).and_then(|t| {
                     walk_tree(repo, path_str, &t).ok()
                 });
             },
             EntryMode::Normal => {
                 let object = try!(Object::read_from_disk(repo, &sha));
-                println!("Tree entry: {:?}", full_path);
                 let mut file = try!(File::create(full_path));
                 try!(file.write_all(&object.content[..]));
                 // FIXME: Need to properly set the file mode here.
@@ -77,7 +69,6 @@ fn walk_tree(repo: &str, parent: &str, tree: &Tree) -> IoResult<()> {
 
 fn extract_tree(repo: &str, commit: &Commit) -> Option<Tree> {
     let sha = &commit.tree;
-    println!("Followed commit to tree {}", sha);
     read_tree(repo, sha)
 }
 
