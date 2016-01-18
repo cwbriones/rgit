@@ -9,6 +9,11 @@ Hopefully by the end of this you should be able to successfully run the followin
 rgit clone git://github.com/cwbriones/rgit.git
 ```
 
+It works! `rgit` can now succesfully clone repos served locally via the git protocol. Some code cleanup
+and implementation of the http git protocol need to be done before cloning remote repos is possible. 
+
+Stay tuned!
+
 ## Todo
 - [x] Transport Protocol and Pack Wire Protocol
   - [x] Reference Discovery (ls-remote)
@@ -18,4 +23,5 @@ rgit clone git://github.com/cwbriones/rgit.git
 - [x] Repo and Object Storage Format
 - [x] Refs
 - [x] Building Working Copy
-- [ ] Index
+- [x] Index
+

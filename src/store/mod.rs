@@ -154,8 +154,6 @@ fn get_index_entry(path: &str, file_mode: EntryMode, sha: String) -> IoResult<In
     // FIXME: This error is not handled.
     let decoded_sha = sha.from_hex().unwrap();
 
-    println!("Attempting to create index entry at {:?}", relative_path);
-    println!("Sha has length {}", decoded_sha.len());
     Ok(IndexEntry {
         ctime: meta.ctime(),
         mtime: meta.mtime(),
@@ -172,7 +170,6 @@ fn get_index_entry(path: &str, file_mode: EntryMode, sha: String) -> IoResult<In
 }
 
 fn write_index(repo: &str, entries: &mut [IndexEntry]) -> IoResult<()> {
-    println!("Attempting to write index with {} entries.", entries.len());
     let mut path = path::PathBuf::new();
     path.push(repo);
     path.push(".git");
@@ -193,9 +190,7 @@ fn encode_index(idx: &mut [IndexEntry]) -> IoResult<Vec<u8>> {
     encoded.append(&mut entries);
     // FIXME: This needs to be hex decoded
     let mut hash = sha1_hash(&encoded);
-    println!("hash length in bits: {}", hash.len() * 8);
     encoded.append(&mut hash);
-    println!("index size: {}", encoded.len());
     Ok(encoded)
 }
 
@@ -216,7 +211,6 @@ fn encode_entry(entry: &IndexEntry) -> Vec<u8> {
         ref file_mode,
         ref path
     , ..} = entry;
-    println!("Encoding entry {}", path);
     let flags = (path.len() & 0xFFF) as u16;
     let (encoded_type, perms) = match *file_mode {
         EntryMode::Normal => (8u32, mode as u32),
@@ -256,7 +250,6 @@ fn encode_entry(entry: &IndexEntry) -> Vec<u8> {
     buf.extend(sha.iter());
     buf.write_u16::<BigEndian>(flags);
     buf.extend(path_and_padding);
-    println!("Entry size: {}", buf.len());
     buf
 }
 
