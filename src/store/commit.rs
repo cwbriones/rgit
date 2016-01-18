@@ -55,6 +55,7 @@ named!(parse_person<&[u8],Person>,
     )
 );
 
+#[allow(unused)]
 fn parse_commit(input: &[u8], sha: String) -> IResult<&[u8], Commit> {
     match parse_commit_inner(input) {
         IResult::Done(buf, raw_parts) => {

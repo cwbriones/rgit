@@ -7,19 +7,15 @@ use std::io::Result as IoResult;
 use std::path;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
-use std::env;
-
 use std::iter::FromIterator;
 
 use byteorder::{BigEndian, WriteBytesExt};
-use byteorder::Result as BoResult;
 
 use rustc_serialize::hex::FromHex;
 
 use packfile::object::{Object,ObjectType};
 use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
-
 
 ///
 /// Resolves the head SHA and attempts to create the file structure
@@ -51,8 +47,8 @@ fn walk(repo: &str, sha: &str) -> Option<Tree> {
 fn walk_tree(repo: &str, parent: &str, tree: &Tree, idx: &mut Vec<IndexEntry>) -> IoResult<()> {
     for entry in &tree.entries {
         let &TreeEntry {
-            ref path, 
-            ref mode, 
+            ref path,
+            ref mode,
             ref sha
         } = entry;
         let mut full_path = path::PathBuf::new();
@@ -72,8 +68,8 @@ fn walk_tree(repo: &str, parent: &str, tree: &Tree, idx: &mut Vec<IndexEntry>) -
                 let mut file = try!(File::create(&full_path));
                 try!(file.write_all(&object.content[..]));
                 let idx_entry = try!(get_index_entry(
-                    full_path.to_str().unwrap(), 
-                    mode.clone(), 
+                    full_path.to_str().unwrap(),
+                    mode.clone(),
                     sha.clone()));
                 idx.push(idx_entry);
             },
@@ -89,7 +85,6 @@ fn extract_tree(repo: &str, commit: &Commit) -> Option<Tree> {
 }
 
 fn read_tree(repo: &str, sha: &str) -> Option<Tree> {
-    use std::str;
     Object::read_from_disk(repo, sha).ok().and_then(|object| {
         Tree::from_packfile_object(object)
     })
@@ -122,10 +117,6 @@ pub fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
     Ok(sha.trim().to_string())
 }
 
-fn resolve_tree(sha: &str) -> IoResult<()> {
-    Ok(())
-}
-
 #[derive(Debug)]
 struct IndexEntry {
     ctime: i64,
@@ -142,8 +133,8 @@ struct IndexEntry {
 }
 
 fn get_index_entry(path: &str, file_mode: EntryMode, sha: String) -> IoResult<IndexEntry> {
-    let mut file = try!(File::open(path));
-    let mut meta = try!(file.metadata());
+    let file = try!(File::open(path));
+    let meta = try!(file.metadata());
 
     // We need to remove the repo path from the path we save on the index entry
     let iter = path::Path::new(path)
@@ -183,18 +174,18 @@ fn write_index(repo: &str, entries: &mut [IndexEntry]) -> IoResult<()> {
 fn encode_index(idx: &mut [IndexEntry]) -> IoResult<Vec<u8>> {
     let mut encoded = try!(index_header(idx.len()));
     idx.sort_by(|a, b| a.path.cmp(&b.path));
+    // FIXME: Handle these errors directly
     let mut entries: Vec<u8> = idx.iter()
-        .map(|e| encode_entry(e))
+        .map(|e| encode_entry(e).unwrap())
         .flat_map(|e| e.into_iter())
         .collect();
     encoded.append(&mut entries);
-    // FIXME: This needs to be hex decoded
     let mut hash = sha1_hash(&encoded);
     encoded.append(&mut hash);
     Ok(encoded)
 }
 
-fn encode_entry(entry: &IndexEntry) -> Vec<u8> {
+fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
     let mut buf: Vec<u8> = Vec::with_capacity(62);
     let &IndexEntry {
         ctime,
@@ -237,29 +228,29 @@ fn encode_entry(entry: &IndexEntry) -> Vec<u8> {
         v
     };
 
-    buf.write_u32::<BigEndian>(ctime as u32);
-    buf.write_u32::<BigEndian>(0u32);
-    buf.write_u32::<BigEndian>(mtime as u32);
-    buf.write_u32::<BigEndian>(0u32);
-    buf.write_u32::<BigEndian>(device as u32);
-    buf.write_u32::<BigEndian>(inode as u32);
-    buf.write_u32::<BigEndian>(encoded_mode);
-    buf.write_u32::<BigEndian>(uid as u32);
-    buf.write_u32::<BigEndian>(gid as u32);
-    buf.write_u32::<BigEndian>(size as u32);
+    try!(buf.write_u32::<BigEndian>(ctime as u32));
+    try!(buf.write_u32::<BigEndian>(0u32));
+    try!(buf.write_u32::<BigEndian>(mtime as u32));
+    try!(buf.write_u32::<BigEndian>(0u32));
+    try!(buf.write_u32::<BigEndian>(device as u32));
+    try!(buf.write_u32::<BigEndian>(inode as u32));
+    try!(buf.write_u32::<BigEndian>(encoded_mode));
+    try!(buf.write_u32::<BigEndian>(uid as u32));
+    try!(buf.write_u32::<BigEndian>(gid as u32));
+    try!(buf.write_u32::<BigEndian>(size as u32));
     buf.extend(sha.iter());
-    buf.write_u16::<BigEndian>(flags);
+    try!(buf.write_u16::<BigEndian>(flags));
     buf.extend(path_and_padding);
-    buf
+    Ok(buf)
 }
 
-fn index_header(num_entries: usize) -> BoResult<Vec<u8>> {
+fn index_header(num_entries: usize) -> IoResult<Vec<u8>> {
     let mut header = Vec::with_capacity(12);
     let magic = 1145655875; // "DIRC"
     let version: u32 = 2;
-    header.write_u32::<BigEndian>(magic);
-    header.write_u32::<BigEndian>(version);
-    header.write_u32::<BigEndian>(num_entries as u32);
+    try!(header.write_u32::<BigEndian>(magic));
+    try!(header.write_u32::<BigEndian>(version));
+    try!(header.write_u32::<BigEndian>(num_entries as u32));
     Ok(header)
 }
 

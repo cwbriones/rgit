@@ -37,8 +37,6 @@ pub fn receive_packfile(host: &str, port: u16, repo: &str) -> io::Result<(Vec<Gi
 }
 
 pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()> {
-    use std::env;
-
     let (refs, packfile_data) = try!(receive_packfile(host, port, repo));
 
     // TODO: This can just be a Path.
@@ -59,10 +57,10 @@ pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()
     let parsed_packfile = PackFile::from_file(file);
     parsed_packfile.unpack_all(dir).expect("Error unpacking parsed packfile");
     try!(refs::create_refs(repo, &refs));
-    refs::update_head(repo, &refs);
+    try!(refs::update_head(repo, &refs));
 
     // Checkout head and format refs
-    store::checkout_head(repo);
+    try!(store::checkout_head(repo));
     Ok(())
 }
 
@@ -91,7 +89,7 @@ pub fn ls_remote(host: &str, port: u16, repo: &str) -> i32 {
 
 fn print_packetlines(pktlines: &Vec<GitRef>) {
     for p in pktlines.iter() {
-        let &GitRef{id: ref id, name: ref name} = p;
+        let &GitRef{ref id, ref name} = p;
         print!("{}\t{}\n", id, name);
     }
 }
@@ -110,7 +108,7 @@ fn ls_remote_priv(host: &str, port: u16, repo: &str) -> io::Result<Vec<GitRef>> 
         let flush_pkt = "0000".as_bytes();
         try!(sock.write_all(flush_pkt));
 
-        let (capabilities, refs) = parse_lines(lines);
+        let (_server_capabilities, refs) = parse_lines(lines);
         Ok(refs)
     })
 }
@@ -128,7 +126,7 @@ fn create_negotiation_request(capabilities: &[&str], refs: &[GitRef]) -> String 
     for (i, r) in filtered.enumerate() {
         let &GitRef{id: ref o, ..} = r;
         if i == 0 {
-            let caps = capabilities.connect(" ");
+            let caps = capabilities.join(" ");
             let line: String = ["want ", &o[..], " ", &caps[..], "\n"].concat();
             lines.push(pktline(&line[..]));
         }

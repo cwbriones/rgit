@@ -1,5 +1,5 @@
 use std::io::Result as IoResult;
-use std::io::{Read,Write};
+use std::io::Write;
 use std::fs;
 use std::fs::File;
 use std::path::{Path,PathBuf};
@@ -30,7 +30,7 @@ fn write_refs(repo: &str, parent_path: &str, refs: &Vec<&GitRef>) -> IoResult<()
         let mut full_path = path.clone();
         let simple_name = Path::new(&r.name).file_name().unwrap();
         full_path.push(&simple_name);
-        create_ref(repo, full_path.to_str().unwrap(), &r.id);
+        try!(create_ref(repo, full_path.to_str().unwrap(), &r.id));
     }
     Ok(())
 }
