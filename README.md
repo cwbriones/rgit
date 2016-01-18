@@ -17,5 +17,5 @@ rgit clone git://github.com/cwbriones/rgit.git
 - [x] Delta Encoding
 - [x] Repo and Object Storage Format
 - [x] Refs
-- [ ] Working Copy and Index
-- [ ] Clone Command
+- [x] Building Working Copy
+- [ ] Index
