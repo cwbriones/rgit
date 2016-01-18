@@ -18,7 +18,7 @@ pub struct TreeEntry {
     pub sha: String
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum EntryMode {
     Normal,
     Executable,
