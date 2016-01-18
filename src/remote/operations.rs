@@ -10,6 +10,7 @@ use std::io::Write;
 
 use std::path;
 use packfile::refs::GitRef;
+use store;
 
 ///
 /// Receives a packfile from the given git repo as a vector of bytes and a vector of refs.
@@ -40,14 +41,14 @@ pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()
 
     let (refs, packfile_data) = try!(receive_packfile(host, port, repo));
 
+    // TODO: This can just be a Path.
     let mut p = path::PathBuf::new();
     p.push(dir);
     p.push(".git");
 
     try!(fs::create_dir_all(&p));
-    try!(env::set_current_dir(&p));
 
-    let filepath = path::Path::new("./pack");
+    let filepath = path::Path::new(".git/pack");
 
     let mut file = try!(File::create(&filepath));
     try!(file.write_all(&packfile_data[..]));
@@ -65,6 +66,7 @@ pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()
     refs::update_head(&refs);
 
     // Checkout head and format refs
+    //store::checkout_head();
     Ok(())
 }
 

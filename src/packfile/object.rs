@@ -1,3 +1,6 @@
+// TODO: Move this module into store and simply by refactoring
+// store::commit and store::tree
+
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 use flate2::read::ZlibDecoder;
@@ -11,17 +14,21 @@ use std::str;
 
 use self::ObjectType::*;
 
+// TODO: We can simplify this by moving the content into the object type
+// as a single field.
 pub struct Object {
     pub obj_type: ObjectType,
     pub content: Vec<u8>
 }
 
-#[derive(Debug)]
+#[derive(PartialEq,Debug)]
 pub enum ObjectType {
     Commit,
     Tree,
     Blob,
     Tag,
+    // TODO: Remove these from the object type since they are
+    // really only relevant when stored and not when in memory.
     OfsDelta(u8),
     RefDelta([u8; 20]),
 }
@@ -131,6 +138,7 @@ impl Object {
 
 fn object_path(sha: &str) -> PathBuf {
     let mut path = PathBuf::new();
+    path.push(".git");
     path.push("objects");
     path.push(&sha[..2]);
     path.push(&sha[2..40]);

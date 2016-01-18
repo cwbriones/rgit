@@ -15,7 +15,7 @@ use std::collections::HashMap;
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
 pub mod refs;
-mod object;
+pub mod object;
 
 // The fields version and num_objects are currently unused
 #[allow(dead_code)]
@@ -83,7 +83,7 @@ impl PackFile {
               .ok()
               .expect("Error writing decoded object to disk");
         }
-        println!("\nDone unpacking.");
+        println!("");
 
         // Resolve deltas
         Ok(())
