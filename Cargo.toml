@@ -12,6 +12,7 @@ getopts = "*"
 rust-crypto = "*"
 rustc-serialize = "*"
 nom = "*"
+byteorder = "*"
 
 [[bin]]
 name = "rgit"

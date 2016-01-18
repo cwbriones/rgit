@@ -2,6 +2,7 @@ extern crate getopts;
 extern crate flate2;
 extern crate crypto;
 extern crate rustc_serialize;
+extern crate byteorder;
 
 #[macro_use]
 extern crate nom;
