@@ -15,7 +15,7 @@ use std::collections::HashMap;
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
 pub mod refs;
-mod object;
+pub mod object;
 
 // The fields version and num_objects are currently unused
 #[allow(dead_code)]
@@ -44,7 +44,7 @@ impl PackFile {
         }
     }
 
-    pub fn unpack_all(&self) -> IoResult<()> {
+    pub fn unpack_all(&self, repo: &str) -> IoResult<()> {
         // Initial Pass, write main objects
         // Accumulate unresolved deltas
 
@@ -61,16 +61,14 @@ impl PackFile {
                 _ => {
                     let sha = object.sha();
                     base_objects.insert(sha, object);
-                    object.write()
-                      .ok()
-                      .expect("Error writing object to disk");
+                    try!(object.write(repo));
                 },
             }
         }
 
         let total = ref_deltas.len();
         for (i, &(ref base_sha, delta)) in ref_deltas.iter().enumerate() {
-            let base_object = try!(Object::read_from_disk(base_sha));
+            let base_object = try!(Object::read_from_disk(repo, base_sha));
             let source = &base_object.content[..];
 
             let patched = Object {
@@ -79,11 +77,11 @@ impl PackFile {
             };
             let percentage = (100.0 * ((i + 1) as f32) / (total as f32)) as usize;
             print!("Resolving deltas: {}% ({}/{})\r", percentage, i + 1, total);
-            patched.write()
+            patched.write(repo)
               .ok()
               .expect("Error writing decoded object to disk");
         }
-        println!("\nDone unpacking.");
+        println!("");
 
         // Resolve deltas
         Ok(())

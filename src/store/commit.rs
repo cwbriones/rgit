@@ -4,8 +4,6 @@ use std::str;
 
 use packfile;
 
-type SHA = String;
-
 #[derive(Debug)]
 pub struct Person {
     name: String,
@@ -15,16 +13,16 @@ pub struct Person {
 
 #[derive(Debug)]
 pub struct Commit {
-    tree: SHA,
-    parents: Vec<SHA>,
-    sha: SHA,
+    pub tree: String,
+    parents: Vec<String>,
+    sha: String,
     author: Person,
     committer: Person,
     message: String
 }
 
 impl Commit {
-    fn from_packfile_object(raw: packfile::Object) -> Option<Self> {
+    pub fn from_packfile_object(raw: packfile::Object) -> Option<Self> {
         if let IResult::Done(_, raw_parts) = parse_commit_inner(&raw.content[..]) {
             let (tree, parents, author, committer, message) = raw_parts;
             Some(Commit {
@@ -36,6 +34,7 @@ impl Commit {
                 message: message.to_string()
             })
         } else {
+            println!("failed to parse commit... :(");
             None
         }
     }

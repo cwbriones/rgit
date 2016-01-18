@@ -1,3 +1,6 @@
+// TODO: Move this module into store and simply by refactoring
+// store::commit and store::tree
+
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 use flate2::read::ZlibDecoder;
@@ -11,24 +14,28 @@ use std::str;
 
 use self::ObjectType::*;
 
+// TODO: We can simplify this by moving the content into the object type
+// as a single field.
 pub struct Object {
     pub obj_type: ObjectType,
     pub content: Vec<u8>
 }
 
-#[derive(Debug)]
+#[derive(PartialEq,Debug)]
 pub enum ObjectType {
     Commit,
     Tree,
     Blob,
     Tag,
+    // TODO: Remove these from the object type since they are
+    // really only relevant when stored and not when in memory.
     OfsDelta(u8),
     RefDelta([u8; 20]),
 }
 
 impl Object {
-    pub fn read_from_disk(sha1: &str) -> IoResult<Self> {
-        let path = object_path(sha1);
+    pub fn read_from_disk(repo: &str, sha1: &str) -> IoResult<Self> {
+        let path = object_path(repo, sha1);
 
         let mut inflated = Vec::new();
         let file = try!(File::open(path));
@@ -75,13 +82,11 @@ impl Object {
         hash
     }
 
-    pub fn write(&self) -> IoResult<()> {
+    pub fn write(&self, repo: &str) -> IoResult<()> {
         let (sha1, blob) = self.encode();
-        let path = object_path(&sha1);
+        let path = object_path(repo, &sha1);
 
-        fs::create_dir_all(path.parent().unwrap())
-          .ok()
-          .expect("Error creating directory to write objects");
+        try!(fs::create_dir_all(path.parent().unwrap()));
 
         let file = try!(File::create(&path));
         let mut z = ZlibEncoder::new(file, Compression::Default);
@@ -129,8 +134,10 @@ impl Object {
     }
 }
 
-fn object_path(sha: &str) -> PathBuf {
+fn object_path(repo: &str, sha: &str) -> PathBuf {
     let mut path = PathBuf::new();
+    path.push(repo);
+    path.push(".git");
     path.push("objects");
     path.push(&sha[..2]);
     path.push(&sha[2..40]);
