@@ -3,6 +3,7 @@ extern crate flate2;
 extern crate crypto;
 extern crate rustc_serialize;
 extern crate byteorder;
+extern crate hyper;
 
 #[macro_use]
 extern crate nom;
@@ -34,14 +35,10 @@ fn run_command(command: &String, args: &[String]) -> i32 {
     let argc = args.len();
     match &command[..] {
         "clone" => {
-            if 0 < argc && argc <= 2 {
+            if argc == 2 {
                 let repo = &args[0];
-                let dir = if args.len() == 2 {
-                    &args[1]
-                } else {
-                    repo
-                };
-                match remote_ops::clone_priv("127.0.0.1", 9418, repo, dir) {
+                let dir = &args[1];
+                match remote_ops::clone_priv(repo, dir) {
                     Ok(_) => 0,
                     Err(_) => -1
                 }

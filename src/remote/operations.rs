@@ -6,17 +6,19 @@ use std::path;
 
 use remote::GitClient;
 use remote::tcpclient::GitTcpClient;
+use remote::httpclient::GitHttpClient;
 use packfile::PackFile;
 use packfile::refs;
 use packfile::refs::GitRef;
 use store;
 
-pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()> {
-    let mut client = try!(GitTcpClient::connect(repo, host, port));
+pub fn clone_priv(repo: &str, dir: &str) -> io::Result<()> {
+    println!("Cloning into \"{}\"...", dir);
+
+    let mut client = GitHttpClient::new(repo);
     let refs = try!(client.discover_refs());
     let packfile_data = try!(client.fetch_packfile(&refs));
 
-    // TODO: This can just be a Path.
     let mut p = path::PathBuf::new();
     p.push(dir);
     p.push(".git");
@@ -31,11 +33,11 @@ pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()
     let parsed_packfile = PackFile::parse(&packfile_data[..]);
     parsed_packfile.unpack_all(dir).expect("Error unpacking parsed packfile");
 
-    try!(refs::create_refs(repo, &refs));
-    try!(refs::update_head(repo, &refs));
+    try!(refs::create_refs(dir, &refs));
+    try!(refs::update_head(dir, &refs));
 
     // Checkout head and format refs
-    try!(store::checkout_head(repo));
+    try!(store::checkout_head(dir));
     Ok(())
 }
 
@@ -43,7 +45,8 @@ pub fn clone_priv(host: &str, port: u16, repo: &str, dir: &str) -> io::Result<()
 /// Lists remote refs available in the given repo.
 ///
 pub fn ls_remote(host: &str, port: u16, repo: &str) -> i32 {
-    let mut client = GitTcpClient::connect(repo, host, port).unwrap();
+    //let mut client = GitTcpClient::connect(repo, host, port).unwrap();
+    let mut client = GitHttpClient::new(repo);
     match client.discover_refs() {
         Ok(pktlines) => {
             print_packetlines(&pktlines);
