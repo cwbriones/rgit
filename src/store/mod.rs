@@ -24,7 +24,7 @@ use self::commit::Commit;
 pub fn checkout_head(repo: &str) -> IoResult<()> {
     let tip = try!(read_sym_ref(repo, "HEAD"));
     let mut idx = Vec::new();
-    // FIXME: This should also "bubble up" errors
+    // FIXME: This should also "bubble up" errors, walk needs to return a result.
     walk(repo, &tip).and_then(|t| walk_tree(repo, repo, &t, &mut idx).ok());
     try!(write_index(repo, &mut idx[..]));
     Ok(())
@@ -174,12 +174,12 @@ fn write_index(repo: &str, entries: &mut [IndexEntry]) -> IoResult<()> {
 fn encode_index(idx: &mut [IndexEntry]) -> IoResult<Vec<u8>> {
     let mut encoded = try!(index_header(idx.len()));
     idx.sort_by(|a, b| a.path.cmp(&b.path));
-    // FIXME: Handle these errors directly
-    let mut entries: Vec<u8> = idx.iter()
-        .map(|e| encode_entry(e).unwrap())
-        .flat_map(|e| e.into_iter())
+    let entries: Result<Vec<_>, _> =
+        idx.iter()
+        .map(|e| encode_entry(e))
         .collect();
-    encoded.append(&mut entries);
+    let mut encoded_entries = try!(entries).concat();
+    encoded.append(&mut encoded_entries);
     let mut hash = sha1_hash(&encoded);
     encoded.append(&mut hash);
     Ok(encoded)
@@ -262,7 +262,8 @@ fn sha1_hash(input: &[u8]) -> Vec<u8> {
 
     let mut hasher = Sha1::new();
     hasher.input(input);
-    let result = hasher.result_str();
-    result.from_hex().unwrap()
+    let mut buf = vec![0; hasher.output_bytes()];
+    hasher.result(&mut buf);
+    buf
 }
 

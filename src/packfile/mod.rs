@@ -76,12 +76,12 @@ impl PackFile {
                 content: delta::patch(source, &delta.content[..])
             };
             let percentage = (100.0 * ((i + 1) as f32) / (total as f32)) as usize;
-            print!("Resolving deltas: {}% ({}/{})\r", percentage, i + 1, total);
+            print!("\rResolving deltas: {}% ({}/{})", percentage, i + 1, total);
             patched.write(repo)
               .ok()
               .expect("Error writing decoded object to disk");
         }
-        println!("");
+        println!(", done.");
 
         // Resolve deltas
         Ok(())
