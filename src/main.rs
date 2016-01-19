@@ -13,7 +13,6 @@ use remote::operations as remote_ops;
 mod remote;
 mod packfile;
 mod store;
-mod reader;
 mod delta;
 
 fn main() {

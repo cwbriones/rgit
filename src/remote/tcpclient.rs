@@ -1,6 +1,5 @@
-use reader::MyReaderExt;
-
 use std::io;
+use std::io::Read;
 use std::result::Result::Err;
 use std::net::TcpStream;
 use std::str;
@@ -75,12 +74,14 @@ pub fn receive_with_sideband(socket: &mut TcpStream) -> io::Result<Vec<u8>> {
 /// Reads and parses a packet-line from the server.
 ///
 fn read_packet_line(socket: &mut TcpStream) -> io::Result<Option<Vec<u8>>> {
-    let header = try!(socket.read_exact(4u64));
+    let mut header = [0; 4];
+    socket.read_exact(&mut header).expect("error parsing header.");
     let length_str = str::from_utf8(&header[..]).unwrap();
     let length = u64::from_str_radix(length_str, 16).unwrap();
 
     if length > 4 {
-        let pkt = try!(socket.read_exact(length - 4));
+        let mut pkt = vec![0; (length - 4) as usize];
+        try!(socket.read_exact(&mut pkt));
         Ok(Some(pkt))
     } else {
         Ok(None)

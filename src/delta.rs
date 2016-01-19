@@ -2,10 +2,7 @@
 use std::io::Read;
 use std::str as Str;
 
-use reader::MyReaderExt;
-
-// TODO: Ensure this isn't dependent on the std::old_io
-// implementation of Reader.
+use byteorder::ReadBytesExt;
 
 pub fn patch(source: &[u8], delta: &[u8]) -> Vec<u8> {
     let mut patcher = DeltaPatcher::new(source, delta);
@@ -54,7 +51,7 @@ impl DeltaHeader {
         let mut count = 0;
 
         while (byte & 0x80) > 0 {
-            byte = MyReaderExt::read_byte(delta).unwrap() as usize;
+            byte = delta.read_u8().unwrap() as usize;
             size += (byte & 127) << (7 * count);
 
             count += 1;
@@ -110,7 +107,7 @@ impl<'a> DeltaPatcher<'a> {
     }
 
     fn next_command(&mut self) -> DeltaOp {
-        let cmd = MyReaderExt::read_byte(&mut self.delta).unwrap();
+        let cmd = self.delta.read_u8().unwrap();
 
         if cmd & 128 > 0 {
             let mut offset = 0usize;
@@ -120,7 +117,7 @@ impl<'a> DeltaPatcher<'a> {
             // Read the offset to copy from
             for &mask in [0x01, 0x02, 0x04, 0x08].iter() {
                 if cmd & mask > 0 {
-                    let byte = MyReaderExt::read_byte(&mut self.delta).unwrap() as u64;
+                    let byte = self.delta.read_u8().unwrap() as u64;
                     offset += (byte as usize) << shift;
                 }
                 shift += 8;
@@ -130,7 +127,7 @@ impl<'a> DeltaPatcher<'a> {
             shift = 0;
             for &mask in [0x10, 0x20, 0x40].iter() {
                 if cmd & mask > 0 {
-                    let byte = MyReaderExt::read_byte(&mut self.delta).unwrap() as u64;
+                    let byte = self.delta.read_u8().unwrap() as u64;
                     length += (byte << shift) as usize;
                 }
                 shift += 8;
@@ -149,7 +146,9 @@ impl<'a> DeltaPatcher<'a> {
                 self.source.iter().skip(start).take(length).map(|x|{ *x }).collect()
             },
             DeltaOp::Insert(length) => {
-                MyReaderExt::read_exact(&mut self.delta, length as u64).unwrap()
+                let mut buf = vec![0; length];
+                self.delta.read_exact(&mut buf).unwrap();
+                buf
             }
         }
     }

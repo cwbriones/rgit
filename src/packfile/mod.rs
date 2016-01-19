@@ -1,8 +1,8 @@
-use reader::MyReaderExt;
 use delta;
 
 use flate2::read::ZlibDecoder;
 use rustc_serialize::hex::ToHex;
+use byteorder::{ReadBytesExt,BigEndian};
 
 pub use self::object::Object;
 pub use self::object::ObjectType;
@@ -27,10 +27,9 @@ pub struct PackFile {
 
 impl PackFile {
     pub fn from_file(mut file: File) -> Self {
-        // Read header bytes in big-endian format
-        let magic = file.read_be_u32().unwrap();
-        let version = file.read_be_u32().unwrap();
-        let num_objects = file.read_be_u32().unwrap();
+        let magic = file.read_u32::<BigEndian>().unwrap();
+        let version = file.read_u32::<BigEndian>().unwrap();
+        let num_objects = file.read_u32::<BigEndian>().unwrap();
 
         if magic == MAGIC_HEADER {
             let objects = read_packfile_objects(&mut file, num_objects);
@@ -96,7 +95,7 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<Object> {
     let mut cursor = Cursor::new(contents);
 
     for _ in 0..num_objects {
-      let mut c = cursor.read_byte().unwrap();
+      let mut c = cursor.read_u8().unwrap();
       let type_id = (c >> 4) & 7;
 
       let mut size: usize = (c & 15) as usize;
@@ -106,7 +105,7 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<Object> {
       // Read the MSB and check if we need to continue
       // consuming bytes to get the object size
       while c & 0x80 > 0 {
-          c = cursor.read_byte().unwrap();
+          c = cursor.read_u8().unwrap();
           size += ((c & 0x7f) as usize) << shift;
           shift += 7;
       }
@@ -157,7 +156,7 @@ fn read_object_type<R>(r: &mut R, id: u8) -> Option<ObjectType> where R: Read {
         7 => {
             let mut base: [u8; 20] = [0; 20];
             for i in 0..20 {
-                base[i] = r.read_byte().unwrap();
+                base[i] = r.read_u8().unwrap();
             }
             Some(ObjectType::RefDelta(base))
         }
@@ -176,7 +175,7 @@ fn read_offset<R>(r: &mut R) -> u8 where R: Read {
     let mut c = 0x80;
     let mut offset = 0;
     while c & 0x80 > 0 {
-        c = r.read_byte().unwrap();
+        c = r.read_u8().unwrap();
         offset += (c & 0x7f) << shift;
         shift += 7;
     }
