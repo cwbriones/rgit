@@ -26,13 +26,20 @@ pub struct PackFile {
 }
 
 impl PackFile {
+    #[allow(unused)]
     pub fn from_file(mut file: File) -> Self {
-        let magic = file.read_u32::<BigEndian>().unwrap();
-        let version = file.read_u32::<BigEndian>().unwrap();
-        let num_objects = file.read_u32::<BigEndian>().unwrap();
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents).ok().expect("Error reading file contents");
+        PackFile::parse(&contents)
+    }
+
+    pub fn parse(mut contents: &[u8]) -> Self {
+        let magic = contents.read_u32::<BigEndian>().unwrap();
+        let version = contents.read_u32::<BigEndian>().unwrap();
+        let num_objects = contents.read_u32::<BigEndian>().unwrap();
 
         if magic == MAGIC_HEADER {
-            let objects = read_packfile_objects(&mut file, num_objects);
+            let objects = read_packfile_objects(contents, num_objects);
             PackFile {
                 version: version,
                 num_objects: num_objects,
@@ -87,11 +94,8 @@ impl PackFile {
     }
 }
 
-fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<Object> {
+fn read_packfile_objects(contents: &[u8], num_objects: u32) -> Vec<Object> {
     let mut objects = Vec::with_capacity(num_objects as usize);
-
-    let mut contents = Vec::new();
-    file.read_to_end(&mut contents).ok().expect("Error reading file contents");
     let mut cursor = Cursor::new(contents);
 
     for _ in 0..num_objects {
@@ -125,7 +129,7 @@ fn read_packfile_objects(file: &mut File, num_objects: u32) -> Vec<Object> {
 }
 
 // Reads exactly size bytes of zlib inflated data from the filestream.
-fn read_object_content(in_data: &mut Cursor<Vec<u8>>, size: usize) -> Vec<u8> {
+fn read_object_content(in_data: &mut Cursor<&[u8]>, size: usize) -> Vec<u8> {
     use std::io::Seek;
     use std::io::SeekFrom;
 
