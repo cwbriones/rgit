@@ -15,9 +15,11 @@ static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
 pub mod refs;
 pub mod object;
+mod index;
 
 pub use self::object::Object;
 pub use self::object::ObjectType;
+pub use self::index::PackIndex;
 
 // The fields version and num_objects are currently unused
 #[allow(dead_code)]
@@ -38,7 +40,7 @@ impl PackFile {
     }
 
     pub fn parse(mut contents: &[u8]) -> IoResult<Self> {
-        let file_sha = store::sha1_hash_hex(&contents[..contents.len() - 20]);
+        let sha_computed = store::sha1_hash_hex(&contents[..contents.len() - 20]);
 
         let magic = try!(contents.read_u32::<BigEndian>());
         let version = try!(contents.read_u32::<BigEndian>());
@@ -51,23 +53,15 @@ impl PackFile {
             // Get the last 20 bytes to read the sha
             let contents_len = contents.len();
 
-            let checksum = &contents[(contents_len - 20)..contents_len].to_hex();
-            assert_eq!(&file_sha, checksum);
-
-            // Compute the sha here by sorting all of the object ids
-            // and then using that for the digest
-            let pack_sha = {
-                let mut all_shas = objects.keys().map(|s| &s[..]).collect::<Vec<_>>();
-                all_shas.sort();
-                store::sha1_hash_all(&all_shas)
-            };
+            let sha = &contents[(contents_len - 20)..contents_len].to_hex();
+            assert_eq!(sha, &sha_computed);
 
             Ok(PackFile {
                 version: version,
                 num_objects: num_objects,
                 objects: objects,
                 encoded_objects: contents.to_vec(),
-                sha: pack_sha
+                sha: sha_computed
             })
         } else {
           unreachable!("Packfile failed to parse");
@@ -96,6 +90,11 @@ impl PackFile {
     pub fn sha(&self) -> &str {
         &self.sha
     }
+//
+//    pub fn find_by_offset(&self, offset: usize) -> Option<Object> {
+//        let mut cursor = Cursor::new(self.encoded_objects);
+//        cursor.seek(offset as u64);
+//    }
 }
 
 ///
@@ -252,5 +251,20 @@ fn read_offset<R>(r: &mut R) -> u8 where R: Read {
         shift += 7;
     }
     offset
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static IDX_FILE: &'static [u8] =
+        include_bytes!(
+            "../../tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.pack"
+        );
+
+    #[test]
+    fn reading_a_packfile() {
+        PackFile::parse(IDX_FILE).unwrap();
+    }
 }
 

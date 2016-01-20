@@ -6,6 +6,7 @@ extern crate byteorder;
 extern crate hyper;
 extern crate clap;
 extern crate ssh2;
+extern crate crc;
 
 #[macro_use]
 extern crate nom;
