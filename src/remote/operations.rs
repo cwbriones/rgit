@@ -5,7 +5,6 @@ use std::io::Write;
 use std::path;
 
 use remote::GitClient;
-use remote::tcpclient::GitTcpClient;
 use remote::httpclient::GitHttpClient;
 use packfile::PackFile;
 use packfile::refs;
