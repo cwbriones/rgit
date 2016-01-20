@@ -88,7 +88,6 @@ impl PackIndex {
         }
 
         // Parse N Checksums
-        println!("Reading checksums.");
         let mut checksums = Vec::with_capacity(size);
         for _ in 0..size {
             let crc = try!(content.read_u32::<BigEndian>());
