@@ -9,6 +9,8 @@ use std::io::{Read,Seek,Cursor};
 use std::io::Result as IoResult;
 use std::collections::HashMap;
 
+use store;
+
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
 pub mod refs;
@@ -22,33 +24,43 @@ pub use self::object::ObjectType;
 pub struct PackFile {
     version: u32,
     num_objects: usize,
-    objects: Vec<Object>,
-    encoded_objects: Vec<u8>
+    objects: HashMap<String, Object>,
+    encoded_objects: Vec<u8>,
+    sha: String,
 }
 
 impl PackFile {
     #[allow(unused)]
-    pub fn from_file(mut file: File) -> Self {
+    pub fn from_file(mut file: File) -> IoResult<Self> {
         let mut contents = Vec::new();
-        file.read_to_end(&mut contents).ok().expect("Error reading file contents");
+        try!(file.read_to_end(&mut contents));
         PackFile::parse(&contents)
     }
 
-    pub fn parse(mut contents: &[u8]) -> Self {
-        let magic = contents.read_u32::<BigEndian>().unwrap();
-        let version = contents.read_u32::<BigEndian>().unwrap();
-        let num_objects = contents.read_u32::<BigEndian>().unwrap() as usize;
+    pub fn parse(mut contents: &[u8]) -> IoResult<Self> {
+        let sha_computed = store::sha1_hash_hex(&contents[..contents.len() - 20]);
+
+        let magic = try!(contents.read_u32::<BigEndian>());
+        let version = try!(contents.read_u32::<BigEndian>());
+        let num_objects = try!(contents.read_u32::<BigEndian>()) as usize;
 
         if magic == MAGIC_HEADER {
             let objects = Objects::new(contents, num_objects)
-                .map(|(_, o)| o)
-                .collect::<Vec<_>>();
-            PackFile {
+                .map(|(_, o)| (o.sha(), o))
+                .collect::<HashMap<_, _>>();
+            // Get the last 20 bytes to read the sha
+            let contents_len = contents.len();
+
+            let sha = &contents[(contents_len - 20)..contents_len].to_hex();
+            assert_eq!(sha, &sha_computed);
+
+            Ok(PackFile {
                 version: version,
                 num_objects: num_objects,
                 objects: objects,
-                encoded_objects: contents.to_vec()
-            }
+                encoded_objects: contents.to_vec(),
+                sha: sha_computed
+            })
         } else {
           unreachable!("Packfile failed to parse");
         }
@@ -67,6 +79,14 @@ impl PackFile {
     ///
     pub fn objects(&self) -> Objects {
         Objects::new(&self.encoded_objects, self.num_objects)
+    }
+
+    pub fn find_by_sha(&self, sha: &str) -> Option<&Object> {
+        self.objects.get(sha)
+    }
+
+    pub fn sha(&self) -> &str {
+        &self.sha
     }
 }
 

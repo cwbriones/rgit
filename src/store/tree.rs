@@ -28,7 +28,7 @@ pub enum EntryMode {
 }
 
 impl Tree {
-    pub fn from_packfile_object(raw: packfile::Object) -> Option<Self> {
+    pub fn from_packfile_object(raw: &packfile::Object) -> Option<Self> {
         match parse_tree_entries(&raw.content[..]) {
             IResult::Done(_, entries) => {
                 Some(Tree {

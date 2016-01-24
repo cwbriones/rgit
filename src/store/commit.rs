@@ -22,7 +22,7 @@ pub struct Commit {
 }
 
 impl Commit {
-    pub fn from_packfile_object(raw: packfile::Object) -> Option<Self> {
+    pub fn from_packfile_object(raw: &packfile::Object) -> Option<Self> {
         if let IResult::Done(_, raw_parts) = parse_commit_inner(&raw.content[..]) {
             let (tree, parents, author, committer, message) = raw_parts;
             Some(Commit {

@@ -1,15 +1,10 @@
-use std::fs;
-use std::fs::File;
 use std::io;
-use std::io::Write;
-use std::path;
 
 use remote::GitClient;
 use remote::httpclient::GitHttpClient;
-use packfile::PackFile;
 use packfile::refs;
 use packfile::refs::GitRef;
-use store;
+use store::Repo;
 
 pub fn clone_priv(repo: &str, dir: &str) -> io::Result<()> {
     println!("Cloning into \"{}\"...", dir);
@@ -18,27 +13,13 @@ pub fn clone_priv(repo: &str, dir: &str) -> io::Result<()> {
     let refs = try!(client.discover_refs());
     let packfile_data = try!(client.fetch_packfile(&refs));
 
-    let mut p = path::PathBuf::new();
-    p.push(dir);
-    p.push(".git");
-
-    try!(fs::create_dir_all(&p));
-
-    let mut filepath = p.clone();
-    filepath.push("pack");
-
-    let mut file = try!(File::create(&filepath));
-    try!(file.write_all(&packfile_data[..]));
-    let packfile = PackFile::parse(&packfile_data[..]);
-
-    // TODO: Replace with reading from the index
-    packfile.unpack_all(dir).expect("Error unpacking parsed packfile");
+    let repo = try!(Repo::from_packfile(dir, &packfile_data));
 
     try!(refs::create_refs(dir, &refs));
     try!(refs::update_head(dir, &refs));
 
     // Checkout head and format refs
-    try!(store::checkout_head(dir));
+    try!(repo.checkout_head());
     Ok(())
 }
 

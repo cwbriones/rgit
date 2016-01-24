@@ -12,6 +12,7 @@ use std::io::Result as IoResult;
 use std::path::PathBuf;
 use std::str;
 
+use store;
 use self::ObjectType::*;
 
 // TODO: We can simplify this by moving the content into the object type
@@ -43,7 +44,7 @@ impl Object {
         let mut z = ZlibDecoder::new(file);
         z.read_to_end(&mut inflated).ok().expect("Error inflating object");
 
-        let sha1_checksum = sha1_hash(&inflated);
+        let sha1_checksum = store::sha1_hash_hex(&inflated);
         assert_eq!(sha1_checksum, sha1);
 
         let split_idx = inflated.iter().position(|x| *x == 0).unwrap();
@@ -72,7 +73,7 @@ impl Object {
             for c in self.content.iter() {
                 blob.push(*c)
             }
-            (sha1_hash(&blob[..]), blob)
+            (store::sha1_hash_hex(&blob[..]), blob)
         } else {
             unreachable!("Tried to write an object type that was not Tree, Commit, Blob, or Tag")
         }
@@ -143,15 +144,5 @@ fn object_path(repo: &str, sha: &str) -> PathBuf {
     path.push(&sha[..2]);
     path.push(&sha[2..40]);
     path
-}
-
-fn sha1_hash(input: &[u8]) -> String {
-    use crypto::digest::Digest;
-    use crypto::sha1::Sha1;
-
-    let mut hasher = Sha1::new();
-    hasher.input(input);
-
-    hasher.result_str()
 }
 

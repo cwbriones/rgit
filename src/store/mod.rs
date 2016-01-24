@@ -4,7 +4,7 @@ mod tree;
 use std::fs::File;
 use std::io::{Read,Write};
 use std::io::Result as IoResult;
-use std::path;
+use std::path::{Path,PathBuf};
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::iter::FromIterator;
@@ -14,80 +14,115 @@ use byteorder::{BigEndian, WriteBytesExt};
 use rustc_serialize::hex::FromHex;
 
 use packfile::object::{Object,ObjectType};
+use packfile::PackFile;
 use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
 
-///
-/// Resolves the head SHA and attempts to create the file structure
-/// of the repository.
-///
-pub fn checkout_head(repo: &str) -> IoResult<()> {
-    let tip = try!(read_sym_ref(repo, "HEAD"));
-    let mut idx = Vec::new();
-    // FIXME: This should also "bubble up" errors, walk needs to return a result.
-    walk(repo, &tip).and_then(|t| walk_tree(repo, repo, &t, &mut idx).ok());
-    try!(write_index(repo, &mut idx[..]));
-    Ok(())
+pub struct Repo<'a> {
+    dir: &'a str,
+    pack: PackFile
 }
 
-fn walk(repo: &str, sha: &str) -> Option<Tree> {
-    Object::read_from_disk(repo, sha).ok().and_then(|object| {
-        match object.obj_type {
-            ObjectType::Commit => {
-                Commit::from_packfile_object(object).and_then(|c| extract_tree(repo, &c))
-            },
-            ObjectType::Tree => {
-                Tree::from_packfile_object(object)
-            },
-            _ => None
-        }
-    })
-}
+impl<'a> Repo<'a> {
+    pub fn from_packfile(dir: &'a str, packfile_data: &[u8]) -> IoResult<Self> {
+        let packfile = try!(PackFile::parse(&packfile_data[..]));
 
-fn walk_tree(repo: &str, parent: &str, tree: &Tree, idx: &mut Vec<IndexEntry>) -> IoResult<()> {
-    for entry in &tree.entries {
-        let &TreeEntry {
-            ref path,
-            ref mode,
-            ref sha
-        } = entry;
-        let mut full_path = path::PathBuf::new();
-        full_path.push(parent);
-        full_path.push(path);
-        match *mode {
-            EntryMode::SubDirectory => {
-                try!(fs::create_dir_all(&full_path));
-                let path_str = full_path.to_str().unwrap();
-                walk(repo, sha).and_then(|t| {
-                    walk_tree(repo, path_str, &t, idx).ok()
-                });
-            },
-            EntryMode::Normal => {
-                let object = try!(Object::read_from_disk(repo, &sha));
-                // FIXME: Need to properly set the file mode here.
-                let mut file = try!(File::create(&full_path));
-                try!(file.write_all(&object.content[..]));
-                let idx_entry = try!(get_index_entry(
-                    full_path.to_str().unwrap(),
-                    mode.clone(),
-                    sha.clone()));
-                idx.push(idx_entry);
-            },
-            _ => panic!("Unsupported Entry Mode")
-        }
+        let mut p = PathBuf::new();
+        p.push(dir);
+        p.push(".git");
+        p.push("objects");
+        p.push("pack");
+        try!(fs::create_dir_all(&p));
+        p.push(format!("pack-{}", packfile.sha()));
+        p.set_extension("pack");
+
+        let mut file = try!(File::create(&p));
+        try!(file.write_all(&packfile_data[..]));
+
+        Ok(Repo {
+            dir: dir,
+            pack: packfile
+        })
     }
-    Ok(())
-}
 
-fn extract_tree(repo: &str, commit: &Commit) -> Option<Tree> {
-    let sha = &commit.tree;
-    read_tree(repo, sha)
-}
+    ///
+    /// Resolves the head SHA and attempts to create the file structure
+    /// of the repository.
+    ///
+    pub fn checkout_head(&self) -> IoResult<()> {
+        let tip = try!(read_sym_ref(self.dir, "HEAD"));
+        let mut idx = Vec::new();
+        // FIXME: This should also "bubble up" errors, walk needs to return a result.
+        self.walk(&tip).and_then(|t| self.walk_tree(self.dir, &t, &mut idx).ok());
+        try!(write_index(self.dir, &mut idx[..]));
+        Ok(())
+    }
 
-fn read_tree(repo: &str, sha: &str) -> Option<Tree> {
-    Object::read_from_disk(repo, sha).ok().and_then(|object| {
-        Tree::from_packfile_object(object)
-    })
+    pub fn walk(&self, sha: &str) -> Option<Tree> {
+        self.read_object(sha).ok().and_then(|object| {
+            match object.obj_type {
+                ObjectType::Commit => {
+                    Commit::from_packfile_object(object).and_then(|c| self.extract_tree(&c))
+                },
+                ObjectType::Tree => {
+                    Tree::from_packfile_object(object)
+                },
+                _ => None
+            }
+        })
+    }
+
+    fn walk_tree(&self, parent: &str, tree: &Tree, idx: &mut Vec<IndexEntry>) -> IoResult<()> {
+        for entry in &tree.entries {
+            let &TreeEntry {
+                ref path,
+                ref mode,
+                ref sha
+            } = entry;
+            let mut full_path = PathBuf::new();
+            full_path.push(parent);
+            full_path.push(path);
+            match *mode {
+                EntryMode::SubDirectory => {
+                    try!(fs::create_dir_all(&full_path));
+                    let path_str = full_path.to_str().unwrap();
+                    self.walk(sha).and_then(|t| {
+                        self.walk_tree(path_str, &t, idx).ok()
+                    });
+                },
+                EntryMode::Normal => {
+                    let object = try!(self.read_object(sha));
+                    // FIXME: Need to properly set the file mode here.
+                    let mut file = try!(File::create(&full_path));
+                    try!(file.write_all(&object.content[..]));
+                    let idx_entry = try!(get_index_entry(
+                        full_path.to_str().unwrap(),
+                        mode.clone(),
+                        sha.clone()));
+                    idx.push(idx_entry);
+                },
+                _ => panic!("Unsupported Entry Mode")
+            }
+        }
+        Ok(())
+    }
+
+    fn extract_tree(&self, commit: &Commit) -> Option<Tree> {
+        let sha = &commit.tree;
+        self.read_tree(sha)
+    }
+
+    fn read_tree(&self, sha: &str) -> Option<Tree> {
+        self.read_object(sha).ok().and_then(|object| {
+            Tree::from_packfile_object(object)
+        })
+    }
+
+    pub fn read_object(&self, sha: &str) -> IoResult<&Object> {
+        let object = self.pack.find_by_sha(sha).unwrap();
+        try!(object.write(self.dir));
+        Ok(object)
+    }
 }
 
 ///
@@ -95,7 +130,7 @@ fn read_tree(repo: &str, sha: &str) -> Option<Tree> {
 ///
 pub fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
     // Read the symbolic ref directly and parse the actual ref out
-    let mut root = path::PathBuf::new();
+    let mut root = PathBuf::new();
     root.push(repo);
     root.push(".git");
 
@@ -137,11 +172,11 @@ fn get_index_entry(path: &str, file_mode: EntryMode, sha: String) -> IoResult<In
     let meta = try!(file.metadata());
 
     // We need to remove the repo path from the path we save on the index entry
-    let iter = path::Path::new(path)
+    let iter = Path::new(path)
         .components()
         .skip(1)
         .map(|c| c.as_os_str());
-    let relative_path =  path::PathBuf::from_iter(iter);
+    let relative_path =  PathBuf::from_iter(iter);
     // FIXME: This error is not handled.
     let decoded_sha = sha.from_hex().unwrap();
 
@@ -161,7 +196,7 @@ fn get_index_entry(path: &str, file_mode: EntryMode, sha: String) -> IoResult<In
 }
 
 fn write_index(repo: &str, entries: &mut [IndexEntry]) -> IoResult<()> {
-    let mut path = path::PathBuf::new();
+    let mut path = PathBuf::new();
     path.push(repo);
     path.push(".git");
     path.push("index");
@@ -254,9 +289,7 @@ fn index_header(num_entries: usize) -> IoResult<Vec<u8>> {
     Ok(header)
 }
 
-// TODO:
-// Remove as this is duplicated in `packfile::object`
-fn sha1_hash(input: &[u8]) -> Vec<u8> {
+pub fn sha1_hash(input: &[u8]) -> Vec<u8> {
     use crypto::digest::Digest;
     use crypto::sha1::Sha1;
 
@@ -265,5 +298,15 @@ fn sha1_hash(input: &[u8]) -> Vec<u8> {
     let mut buf = vec![0; hasher.output_bytes()];
     hasher.result(&mut buf);
     buf
+}
+
+pub fn sha1_hash_hex(input: &[u8]) -> String {
+    use crypto::digest::Digest;
+    use crypto::sha1::Sha1;
+
+    let mut hasher = Sha1::new();
+    hasher.input(input);
+
+    hasher.result_str()
 }
 
