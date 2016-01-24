@@ -29,8 +29,10 @@ pub fn clone_priv(repo: &str, dir: &str) -> io::Result<()> {
 
     let mut file = try!(File::create(&filepath));
     try!(file.write_all(&packfile_data[..]));
-    let parsed_packfile = PackFile::parse(&packfile_data[..]);
-    parsed_packfile.unpack_all(dir).expect("Error unpacking parsed packfile");
+    let packfile = PackFile::parse(&packfile_data[..]);
+
+    // TODO: Replace with reading from the index
+    packfile.unpack_all(dir).expect("Error unpacking parsed packfile");
 
     try!(refs::create_refs(dir, &refs));
     try!(refs::update_head(dir, &refs));

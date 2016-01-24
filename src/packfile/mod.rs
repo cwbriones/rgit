@@ -55,45 +55,9 @@ impl PackFile {
     }
 
     pub fn unpack_all(&self, repo: &str) -> IoResult<()> {
-        // Initial Pass, write main objects
-        // Accumulate unresolved deltas
-
-        let mut base_objects = HashMap::new();
-        let mut ref_deltas = Vec::new();
-
-        for object in &self.objects {
-            match object.obj_type {
-                ObjectType::RefDelta(base) => {
-                    let hex_base = base.to_hex();
-                    ref_deltas.push((hex_base, object));
-                },
-                ObjectType::OfsDelta(_) => (),
-                _ => {
-                    let sha = object.sha();
-                    base_objects.insert(sha, object);
-                    try!(object.write(repo));
-                },
-            }
+        for (_, object) in self.objects() {
+            try!(object.write(repo))
         }
-
-        let total = ref_deltas.len();
-        for (i, &(ref base_sha, delta)) in ref_deltas.iter().enumerate() {
-            let base_object = try!(Object::read_from_disk(repo, base_sha));
-            let source = &base_object.content[..];
-
-            let patched = Object {
-                obj_type: base_object.obj_type,
-                content: delta::patch(source, &delta.content[..])
-            };
-            let percentage = (100.0 * ((i + 1) as f32) / (total as f32)) as usize;
-            print!("\rResolving deltas: {}% ({}/{})", percentage, i + 1, total);
-            patched.write(repo)
-              .ok()
-              .expect("Error writing decoded object to disk");
-        }
-        println!(", done.");
-
-        // Resolve deltas
         Ok(())
     }
 
@@ -112,12 +76,48 @@ impl PackFile {
 ///
 struct Objects<'a> {
     cursor: Cursor<&'a [u8]>,
-    remaining: usize
+    remaining: usize,
+    base_objects: HashMap<String, Object>,
+    ref_deltas: Vec<(usize, String, Object)>,
+    resolve: bool,
 }
 
 impl<'a> Objects<'a> {
     fn new(buf: &'a [u8], size: usize) -> Self {
-        Objects { cursor: Cursor::new(buf), remaining: size }
+        Objects {
+            cursor: Cursor::new(buf),
+            remaining: size,
+            ref_deltas: Vec::new(),
+            base_objects: HashMap::new(),
+            resolve: false
+        }
+    }
+
+    fn read_object(&mut self) -> Object {
+        let mut c = self.cursor.read_u8().unwrap();
+        let type_id = (c >> 4) & 7;
+
+        let mut size: usize = (c & 15) as usize;
+        let mut shift: usize = 4;
+
+        // Parse the variable length size header for the object.
+        // Read the MSB and check if we need to continue
+        // consuming bytes to get the object size
+        while c & 0x80 > 0 {
+            c = self.cursor.read_u8().unwrap();
+            size += ((c & 0x7f) as usize) << shift;
+            shift += 7;
+        }
+
+        let obj_type = read_object_type(&mut self.cursor, type_id).expect(
+            "Error parsing object type in packfile"
+            );
+        let content = read_object_content(&mut self.cursor, size);
+
+        Object {
+            obj_type: obj_type,
+            content: content
+        }
     }
 }
 
@@ -125,36 +125,45 @@ impl<'a> Iterator for Objects<'a> {
     type Item = (usize, Object);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining > 0 {
-            self.remaining -= 1; 
-            let current_position = self.cursor.position() as usize;
-            let mut c = self.cursor.read_u8().unwrap();
-            let type_id = (c >> 4) & 7;
+        // First yield all the base objects
+        while self.remaining > 0 {
+            self.remaining -= 1;
+            let offset = self.cursor.position() as usize;
+            let object = self.read_object();
 
-            let mut size: usize = (c & 15) as usize;
-            let mut shift: usize = 4;
-
-            // Parse the variable length size header for the object.
-            // Read the MSB and check if we need to continue
-            // consuming bytes to get the object size
-            while c & 0x80 > 0 {
-                c = self.cursor.read_u8().unwrap();
-                size += ((c & 0x7f) as usize) << shift;
-                shift += 7;
+            match object.obj_type {
+                ObjectType::RefDelta(base) => {
+                    let hex_base = base.to_hex();
+                    self.ref_deltas.push((offset, hex_base, object));
+                },
+                ObjectType::OfsDelta(_) => (),
+                _ => {
+                    let sha = object.sha();
+                    self.base_objects.insert(sha, object.clone());
+                    return Some((offset, object))
+                },
             }
-
-            let obj_type = read_object_type(&mut self.cursor, type_id).expect(
-                "Error parsing object type in packfile"
-                );
-
-            let content = read_object_content(&mut self.cursor, size);
-            let object = Object {
-                obj_type: obj_type,
-                content: content
-            };
-            Some((current_position, object))
-        } else {
-            None
+        }
+        if !self.resolve {
+            self.resolve = true;
+            self.ref_deltas.reverse();
+        }
+        // Then resolve and yield all the delta objects
+        match self.ref_deltas.pop() {
+            Some((offset, base, delta)) => {
+                let patched = {
+                    let base_object = self.base_objects.get(&base).unwrap();
+                    let source = &base_object.content[..];
+                    Object {
+                        obj_type: base_object.obj_type,
+                        content: delta::patch(source, &delta.content[..])
+                    }
+                };
+                let sha = patched.sha();
+                self.base_objects.insert(sha, patched.clone());
+                Some((offset, patched))
+            },
+            None => None
         }
     }
 }

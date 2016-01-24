@@ -16,12 +16,13 @@ use self::ObjectType::*;
 
 // TODO: We can simplify this by moving the content into the object type
 // as a single field.
+#[derive(Clone,PartialEq,Debug)]
 pub struct Object {
     pub obj_type: ObjectType,
     pub content: Vec<u8>
 }
 
-#[derive(PartialEq,Debug)]
+#[derive(Copy,Clone,PartialEq,Debug)]
 pub enum ObjectType {
     Commit,
     Tree,
