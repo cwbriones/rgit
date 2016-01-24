@@ -4,9 +4,6 @@ use flate2::read::ZlibDecoder;
 use rustc_serialize::hex::ToHex;
 use byteorder::{ReadBytesExt,BigEndian};
 
-pub use self::object::Object;
-pub use self::object::ObjectType;
-
 use std::fs::File;
 use std::io::{Read,Seek,Cursor};
 use std::io::Result as IoResult;
@@ -17,12 +14,16 @@ static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 pub mod refs;
 pub mod object;
 
+pub use self::object::Object;
+pub use self::object::ObjectType;
+
 // The fields version and num_objects are currently unused
 #[allow(dead_code)]
 pub struct PackFile {
     version: u32,
-    num_objects: u32,
-    objects: Vec<Object>
+    num_objects: usize,
+    objects: Vec<Object>,
+    encoded_objects: Vec<u8>
 }
 
 impl PackFile {
@@ -36,14 +37,17 @@ impl PackFile {
     pub fn parse(mut contents: &[u8]) -> Self {
         let magic = contents.read_u32::<BigEndian>().unwrap();
         let version = contents.read_u32::<BigEndian>().unwrap();
-        let num_objects = contents.read_u32::<BigEndian>().unwrap();
+        let num_objects = contents.read_u32::<BigEndian>().unwrap() as usize;
 
         if magic == MAGIC_HEADER {
-            let objects = read_packfile_objects(contents, num_objects);
+            let objects = Objects::new(contents, num_objects)
+                .map(|(_, o)| o)
+                .collect::<Vec<_>>();
             PackFile {
                 version: version,
                 num_objects: num_objects,
-                objects: objects
+                objects: objects,
+                encoded_objects: contents.to_vec()
             }
         } else {
           unreachable!("Packfile failed to parse");
@@ -92,40 +96,67 @@ impl PackFile {
         // Resolve deltas
         Ok(())
     }
+
+    ///
+    /// Returns an iterator over the objects within this packfile, along
+    /// with their offsets.
+    ///
+    pub fn objects(&self) -> Objects {
+        Objects::new(&self.encoded_objects, self.num_objects)
+    }
 }
 
-fn read_packfile_objects(contents: &[u8], num_objects: u32) -> Vec<Object> {
-    let mut objects = Vec::with_capacity(num_objects as usize);
-    let mut cursor = Cursor::new(contents);
+///
+/// An iterator over the objects within a packfile, along
+/// with their offsets.
+///
+struct Objects<'a> {
+    cursor: Cursor<&'a [u8]>,
+    remaining: usize
+}
 
-    for _ in 0..num_objects {
-      let mut c = cursor.read_u8().unwrap();
-      let type_id = (c >> 4) & 7;
-
-      let mut size: usize = (c & 15) as usize;
-      let mut shift: usize = 4;
-
-      // Parse the variable length size header for the object.
-      // Read the MSB and check if we need to continue
-      // consuming bytes to get the object size
-      while c & 0x80 > 0 {
-          c = cursor.read_u8().unwrap();
-          size += ((c & 0x7f) as usize) << shift;
-          shift += 7;
-      }
-
-      let obj_type = read_object_type(&mut cursor, type_id).expect(
-          "Error parsing object type in packfile"
-          );
-
-      let content = read_object_content(&mut cursor, size);
-      let obj = Object {
-          obj_type: obj_type,
-          content: content
-      };
-      objects.push(obj);
+impl<'a> Objects<'a> {
+    fn new(buf: &'a [u8], size: usize) -> Self {
+        Objects { cursor: Cursor::new(buf), remaining: size }
     }
-    objects
+}
+
+impl<'a> Iterator for Objects<'a> {
+    type Item = (usize, Object);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining > 0 {
+            self.remaining -= 1; 
+            let current_position = self.cursor.position() as usize;
+            let mut c = self.cursor.read_u8().unwrap();
+            let type_id = (c >> 4) & 7;
+
+            let mut size: usize = (c & 15) as usize;
+            let mut shift: usize = 4;
+
+            // Parse the variable length size header for the object.
+            // Read the MSB and check if we need to continue
+            // consuming bytes to get the object size
+            while c & 0x80 > 0 {
+                c = self.cursor.read_u8().unwrap();
+                size += ((c & 0x7f) as usize) << shift;
+                shift += 7;
+            }
+
+            let obj_type = read_object_type(&mut self.cursor, type_id).expect(
+                "Error parsing object type in packfile"
+                );
+
+            let content = read_object_content(&mut self.cursor, size);
+            let object = Object {
+                obj_type: obj_type,
+                content: content
+            };
+            Some((current_position, object))
+        } else {
+            None
+        }
+    }
 }
 
 // Reads exactly size bytes of zlib inflated data from the filestream.
