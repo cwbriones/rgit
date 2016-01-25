@@ -4,12 +4,16 @@ extern crate crypto;
 extern crate rustc_serialize;
 extern crate byteorder;
 extern crate hyper;
+extern crate clap;
 
 #[macro_use]
 extern crate nom;
 
-use std::env;
+use clap::{Arg, App, SubCommand};
+
 use remote::operations as remote_ops;
+
+use std::process;
 
 mod remote;
 mod packfile;
@@ -17,58 +21,59 @@ mod store;
 mod delta;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let app_matches = App::new("rgit")
+        .version("0.1.0")
+        .about("A Git implementation in Rust.")
+        .subcommand(SubCommand::with_name("clone")
+            .about("Clone a remote repository")
+            .arg(Arg::with_name("repo")
+                .required(true)
+            )
+            .arg(Arg::with_name("dir"))
+        )
+        .subcommand(SubCommand::with_name("ls-remote")
+            .about("List available refs in a remote repository")
+            .arg(Arg::with_name("repo")
+                 .required(true)
+            )
+        )
+        .subcommand(SubCommand::with_name("test-delta")
+            .about("Reconstruct an object given a base and delta file")
+            .arg(Arg::with_name("base")
+                 .required(true)
+            )
+            .arg(Arg::with_name("delta")
+                 .required(true)
+            )
+        )
+        .get_matches();
 
-    if args.len() > 1 {
-        let status_code = run_command(&args[1], &args[2..]);
-        std::process::exit(status_code)
-    } else {
-        let usage =
-            "usage: rgit <command> [<args>]\n\n\
-            Supported Commands:\n\
-            ls-remote <repo>           List references in a remote repository\n";
-        print!("{}", usage);
-    }
-}
-
-fn run_command(command: &String, args: &[String]) -> i32 {
-    let argc = args.len();
-    match &command[..] {
-        "clone" => {
-            if argc == 2 {
-                let repo = &args[0];
-                let dir = &args[1];
-                match remote_ops::clone_priv(repo, dir) {
-                    Ok(_) => 0,
-                    Err(_) => -1
-                }
-            } else {
-                println!("incorrect number of arguments");
-                -1
-            }
+    let result = match app_matches.subcommand_name() {
+        Some(s @ "clone") => {
+            let matches = app_matches.subcommand_matches(s).unwrap();
+            let repo = matches.value_of("repo").unwrap();
+            let dir  = matches.value_of("dir").map(|s| s.to_string());
+            remote_ops::clone_priv(repo, dir)
         },
-        "test-delta" => {
-            if argc == 2 {
-                let (source, delta) = (&args[0], &args[1]);
-                delta::patch_file(&source[..], &delta[..]);
-                0
-            } else {
-                println!("incorrect number of arguments");
-                -1
-            }
+        Some(s @ "ls-remote") => {
+            let matches = app_matches.subcommand_matches(s).unwrap();
+            let repo = matches.value_of("repo").unwrap();
+            remote_ops::ls_remote(repo)
         },
-        "ls-remote" => {
-            if argc == 1 {
-                let repo = &args[0];
-                remote_ops::ls_remote("127.0.0.1", 9418, repo)
-            } else {
-                println!("incorrect number of arguments");
-                -1
-            }
+        Some(s @ "test-delta") => {
+            let matches = app_matches.subcommand_matches(s).unwrap();
+            let source = matches.value_of("source").unwrap();
+            let delta  = matches.value_of("delta").unwrap();
+            delta::patch_file(source, delta)
         },
-        unknown => {
-            println!("Unknown command: {}", unknown);
-            -1
+        Some(_) => unreachable!(),
+        None    => {
+            println!("{}", app_matches.usage());
+            Ok(())
         }
+    };
+    if let Err(e) = result {
+        println!("Error: {}", e);
+        process::exit(-1)
     }
 }

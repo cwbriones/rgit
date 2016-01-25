@@ -2,7 +2,9 @@ use std::io;
 use std::io::Read;
 
 use hyper::Url;
-use hyper::client::{IntoUrl,Client};
+use hyper::header::Location;
+use hyper::status::StatusCode;
+use hyper::client::{IntoUrl,RedirectPolicy,Client};
 
 use super::GitClient;
 use packfile::refs::GitRef;
@@ -16,9 +18,10 @@ const REF_DISCOVERY_ENDPOINT: &'static str = "/info/refs?service=git-upload-pack
 const UPLOAD_PACK_ENDPOINT: &'static str = "/git-upload-pack";
 
 impl GitHttpClient {
-    pub fn new<U: IntoUrl>(url: U) -> Self {
+    pub fn new<U: IntoUrl>(u: U) -> Self {
+        let url = u.into_url().unwrap();
         GitHttpClient {
-            url: url.into_url().unwrap(),
+            url: follow_url(url),
             client: Client::new(),
         }
     }
@@ -63,3 +66,32 @@ impl GitClient for GitHttpClient {
     }
 }
 
+///
+/// Follows the given url to what is most likely the actual repository.
+///
+/// Hyper follows redirects by default but we have no way of extracting the actual
+/// url and checking that it is fully qualified, since some services (e.g. GitHub)
+/// don't return a redirect when making a packfile request to the wrong URL.
+///
+fn follow_url(mut url: Url) -> Url {
+    let mut client = Client::new();
+    client.set_redirect_policy(RedirectPolicy::FollowNone);
+    loop {
+        let res = client.get(url.clone()).send().unwrap();
+        match res.status {
+            StatusCode::MovedPermanently => {
+                let &Location(ref loc) = res.headers.get().unwrap();
+                url = Url::parse(loc).unwrap();
+            },
+            _ => {
+                let followed_url = url.serialize();
+                let qualified_url = if !followed_url.ends_with(".git") {
+                    [followed_url + ".git"].join("")
+                } else {
+                    followed_url
+                };
+                return Url::parse(&qualified_url).unwrap()
+            }
+        }
+    }
+}

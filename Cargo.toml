@@ -14,6 +14,7 @@ rustc-serialize = "0.3.16"
 nom = "1.1.0"
 byteorder = "0.4.2"
 hyper = "*"
+clap = "1.5.5"
 
 [[bin]]
 name = "rgit"
