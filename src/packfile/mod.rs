@@ -38,7 +38,7 @@ impl PackFile {
     }
 
     pub fn parse(mut contents: &[u8]) -> IoResult<Self> {
-        let sha_computed = store::sha1_hash_hex(&contents[..contents.len() - 20]);
+        let file_sha = store::sha1_hash_hex(&contents[..contents.len() - 20]);
 
         let magic = try!(contents.read_u32::<BigEndian>());
         let version = try!(contents.read_u32::<BigEndian>());
@@ -51,15 +51,23 @@ impl PackFile {
             // Get the last 20 bytes to read the sha
             let contents_len = contents.len();
 
-            let sha = &contents[(contents_len - 20)..contents_len].to_hex();
-            assert_eq!(sha, &sha_computed);
+            let checksum = &contents[(contents_len - 20)..contents_len].to_hex();
+            assert_eq!(&file_sha, checksum);
+
+            // Compute the sha here by sorting all of the object ids
+            // and then using that for the digest
+            let pack_sha = {
+                let mut all_shas = objects.keys().map(|s| &s[..]).collect::<Vec<_>>();
+                all_shas.sort();
+                store::sha1_hash_all(&all_shas)
+            };
 
             Ok(PackFile {
                 version: version,
                 num_objects: num_objects,
                 objects: objects,
                 encoded_objects: contents.to_vec(),
-                sha: sha_computed
+                sha: pack_sha
             })
         } else {
           unreachable!("Packfile failed to parse");

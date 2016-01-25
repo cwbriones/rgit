@@ -36,6 +36,8 @@ impl<'a> Repo<'a> {
         p.push(format!("pack-{}", packfile.sha()));
         p.set_extension("pack");
 
+        try!(packfile.unpack_all(dir));
+
         let mut file = try!(File::create(&p));
         try!(file.write_all(&packfile_data[..]));
 
@@ -120,7 +122,6 @@ impl<'a> Repo<'a> {
 
     pub fn read_object(&self, sha: &str) -> IoResult<&Object> {
         let object = self.pack.find_by_sha(sha).unwrap();
-        try!(object.write(self.dir));
         Ok(object)
     }
 }
@@ -307,6 +308,17 @@ pub fn sha1_hash_hex(input: &[u8]) -> String {
     let mut hasher = Sha1::new();
     hasher.input(input);
 
+    hasher.result_str()
+}
+
+pub fn sha1_hash_all(inputs: &[&str]) -> String {
+    use crypto::digest::Digest;
+    use crypto::sha1::Sha1;
+
+    let mut hasher = Sha1::new();
+    for s in inputs {
+        hasher.input_str(s);
+    }
     hasher.result_str()
 }
 
