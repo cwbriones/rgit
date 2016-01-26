@@ -1,11 +1,11 @@
 mod commit;
 mod tree;
 
-use std::fs::File;
+use std::fs::{self, File};
+use std::os::unix::fs::PermissionsExt;
 use std::io::{Read,Write};
 use std::io::Result as IoResult;
 use std::path::{Path,PathBuf};
-use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::iter::FromIterator;
 
@@ -92,18 +92,28 @@ impl<'a> Repo<'a> {
                         self.walk_tree(path_str, &t, idx).ok()
                     });
                 },
-                EntryMode::Normal => {
+                EntryMode::Normal | EntryMode::Executable => {
                     let object = try!(self.read_object(sha));
                     // FIXME: Need to properly set the file mode here.
                     let mut file = try!(File::create(&full_path));
                     try!(file.write_all(&object.content[..]));
+                    let meta = try!(file.metadata());
+                    let mut perms = meta.permissions();
+
+                    let raw_mode = match *mode {
+                        EntryMode::Normal => 33188,
+                        _ => 33261
+                    };
+                    perms.set_mode(raw_mode);
+                    try!(fs::set_permissions(&full_path, perms));
+
                     let idx_entry = try!(get_index_entry(
                         full_path.to_str().unwrap(),
                         mode.clone(),
                         sha.clone()));
                     idx.push(idx_entry);
                 },
-                _ => panic!("Unsupported Entry Mode")
+                ref e => panic!("Unsupported Entry Mode {:?}", e)
             }
         }
         Ok(())
@@ -243,6 +253,7 @@ fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
         EntryMode::Normal => (8u32, mode as u32),
         EntryMode::Symlink => (10u32, 0u32),
         EntryMode::Gitlink => (14u32, 0u32),
+        EntryMode::Executable => (8u32, mode as u32),
         _ => unreachable!("Tried to create an index entry for a non-indexable object")
     };
     let encoded_mode = (encoded_type << 12) | perms;

@@ -5,6 +5,7 @@ extern crate rustc_serialize;
 extern crate byteorder;
 extern crate hyper;
 extern crate clap;
+extern crate ssh2;
 
 #[macro_use]
 extern crate nom;
@@ -31,8 +32,32 @@ fn main() {
             )
             .arg(Arg::with_name("dir"))
         )
+        .subcommand(SubCommand::with_name("clone-ssh")
+            .about("Clone a remote repository using ssh")
+            .arg(Arg::with_name("host")
+                .required(true)
+            )
+            .arg(Arg::with_name("user")
+                .required(true)
+            )
+            .arg(Arg::with_name("repo")
+                .required(true)
+            )
+        )
         .subcommand(SubCommand::with_name("ls-remote")
             .about("List available refs in a remote repository")
+            .arg(Arg::with_name("repo")
+                 .required(true)
+            )
+        )
+        .subcommand(SubCommand::with_name("ls-remote-ssh")
+            .about("List available refs in a remote repository using ssh")
+            .arg(Arg::with_name("host")
+                 .required(true)
+            )
+            .arg(Arg::with_name("user")
+                 .required(true)
+            )
             .arg(Arg::with_name("repo")
                  .required(true)
             )
@@ -55,10 +80,24 @@ fn main() {
             let dir  = matches.value_of("dir").map(|s| s.to_string());
             remote_ops::clone_priv(repo, dir)
         },
+        Some(s @ "clone-ssh") => {
+            let matches = app_matches.subcommand_matches(s).unwrap();
+            let host = matches.value_of("host").unwrap();
+            let user = matches.value_of("user").unwrap();
+            let repo = matches.value_of("repo").unwrap();
+            remote_ops::clone_ssh_priv(host, user, repo)
+        },
         Some(s @ "ls-remote") => {
             let matches = app_matches.subcommand_matches(s).unwrap();
             let repo = matches.value_of("repo").unwrap();
             remote_ops::ls_remote(repo)
+        },
+        Some(s @ "ls-remote-ssh") => {
+            let matches = app_matches.subcommand_matches(s).unwrap();
+            let host = matches.value_of("host").unwrap();
+            let user = matches.value_of("user").unwrap();
+            let repo = matches.value_of("repo").unwrap();
+            remote_ops::ls_remote_ssh(host, user, repo)
         },
         Some(s @ "test-delta") => {
             let matches = app_matches.subcommand_matches(s).unwrap();

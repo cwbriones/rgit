@@ -7,6 +7,7 @@ use packfile::refs::GitRef;
 pub mod tcpclient;
 pub mod httpclient;
 pub mod operations;
+mod sshclient;
 
 pub trait GitClient {
     // Required Methods

@@ -3,6 +3,7 @@ use std::io::Result as IoResult;
 use remote::GitClient;
 use remote::httpclient::GitHttpClient;
 use remote::tcpclient::GitTcpClient;
+use remote::sshclient::GitSSHClient;
 use packfile::refs;
 use packfile::refs::GitRef;
 use store::Repo;
@@ -42,11 +43,44 @@ pub fn clone_priv(repo: &str, maybe_dir: Option<String>) -> IoResult<()> {
     Ok(())
 }
 
+pub fn clone_ssh_priv(host: &str, user: &str, repo: &str) -> IoResult<()> {
+    let dir = repo.split(".")
+        .next().unwrap()
+        .to_string();
+    let full_repo = [user, "/", repo].join("");
+    let mut client = GitSSHClient::new(host, &full_repo);
+
+    println!("Cloning into \"{}\"...", dir);
+
+    let refs = try!(client.discover_refs());
+    let packfile_data = try!(client.fetch_packfile(&refs));
+
+    let repo = try!(Repo::from_packfile(&dir, &packfile_data));
+
+    try!(refs::create_refs(&dir, &refs));
+    try!(refs::update_head(&dir, &refs));
+
+    // Checkout head and format refs
+    try!(repo.checkout_head());
+    Ok(())
+}
+
 ///
 /// Lists remote refs available in the given repo.
 ///
 pub fn ls_remote(repo: &str) -> IoResult<()> {
     let mut client = GitHttpClient::new(repo);
+    client.discover_refs().map(|pktlines| {
+        print_packetlines(&pktlines);
+    })
+}
+
+///
+/// Lists remote refs available in the given repo.
+///
+pub fn ls_remote_ssh(host: &str, user: &str, repo: &str) -> IoResult<()> {
+    let full_repo = [user, "/", repo].join("");
+    let mut client = GitSSHClient::new(host, &full_repo);
     client.discover_refs().map(|pktlines| {
         print_packetlines(&pktlines);
     })
