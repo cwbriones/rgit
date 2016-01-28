@@ -14,7 +14,7 @@ use byteorder::{BigEndian, WriteBytesExt};
 use rustc_serialize::hex::FromHex;
 
 use packfile::object::{Object,ObjectType};
-use packfile::PackFile;
+use packfile::{PackFile, PackIndex};
 use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
 
@@ -40,6 +40,8 @@ impl<'a> Repo<'a> {
 
         let mut file = try!(File::create(&p));
         try!(file.write_all(&packfile_data[..]));
+
+        let index = PackIndex::from_packfile(&packfile);
 
         Ok(Repo {
             dir: dir,
@@ -307,6 +309,19 @@ pub fn sha1_hash(input: &[u8]) -> Vec<u8> {
 
     let mut hasher = Sha1::new();
     hasher.input(input);
+    let mut buf = vec![0; hasher.output_bytes()];
+    hasher.result(&mut buf);
+    buf
+}
+
+pub fn sha1_hash_iter<'a, I: Iterator<Item=&'a [u8]>>(inputs: I) -> Vec<u8> {
+    use crypto::digest::Digest;
+    use crypto::sha1::Sha1;
+
+    let mut hasher = Sha1::new();
+    for input in inputs {
+        hasher.input(input);
+    }
     let mut buf = vec![0; hasher.output_bytes()];
     hasher.result(&mut buf);
     buf
