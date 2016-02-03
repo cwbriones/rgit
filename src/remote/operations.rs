@@ -18,12 +18,12 @@ pub fn clone_priv(repo: &str, maybe_dir: Option<String>) -> IoResult<()> {
                     .last().unwrap()
                     .split(".")
                     .next().unwrap()
-                    .to_string()
+                    .to_owned()
             });
             (Box::new(GitHttpClient::new(repo)), dir)
         },
         Err(_) => {
-            let dir = maybe_dir.unwrap_or(repo.to_string());
+            let dir = maybe_dir.unwrap_or(repo.to_owned());
             let client = try!(GitTcpClient::connect(repo, "127.0.0.1", 9418));
             (Box::new(client), dir)
         }
@@ -46,7 +46,7 @@ pub fn clone_priv(repo: &str, maybe_dir: Option<String>) -> IoResult<()> {
 pub fn clone_ssh_priv(host: &str, user: &str, repo: &str) -> IoResult<()> {
     let dir = repo.split(".")
         .next().unwrap()
-        .to_string();
+        .to_owned();
     let full_repo = [user, "/", repo].join("");
     let mut client = GitSSHClient::new(host, &full_repo);
 

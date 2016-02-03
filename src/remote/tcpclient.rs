@@ -10,14 +10,20 @@ pub struct GitTcpClient {
     stream: TcpStream,
     repo: String,
     host: String,
-    port: u16,
+    _port: u16,
 }
 
 impl GitTcpClient {
     //pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
+    #[allow(dead_code)]
     pub fn connect(repo: &str, host: &str, port: u16) -> io::Result<Self> {
         let stream = try!(TcpStream::connect((host, port)));
-        Ok(GitTcpClient{repo: repo.to_string(), stream: stream, host: host.to_string(), port: port})
+        Ok(GitTcpClient{
+            repo: repo.to_owned(),
+            stream: stream,
+            host: host.to_owned(),
+            _port: port
+        })
     }
 
     ///

@@ -30,7 +30,7 @@ impl GitHttpClient {
 impl GitClient for GitHttpClient {
 
     fn discover_refs(&mut self) -> io::Result<Vec<GitRef>> {
-        let discovery_url = [self.url.serialize(), REF_DISCOVERY_ENDPOINT.to_string()].join("");
+        let discovery_url = [self.url.serialize(), REF_DISCOVERY_ENDPOINT.to_owned()].join("");
         let mut res = self.client.get(&discovery_url).send().unwrap();
 
         // The server first sends a header to verify the service is correct
@@ -51,7 +51,7 @@ impl GitClient for GitHttpClient {
     fn fetch_packfile(&mut self, want: &[GitRef]) -> io::Result<Vec<u8>> {
         let capabilities = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
         let body = super::create_negotiation_request(&capabilities, want);
-        let pack_endpoint = [self.url.serialize(), UPLOAD_PACK_ENDPOINT.to_string()].join("");
+        let pack_endpoint = [self.url.serialize(), UPLOAD_PACK_ENDPOINT.to_owned()].join("");
 
         let mut res = self.client
             .post(&pack_endpoint)

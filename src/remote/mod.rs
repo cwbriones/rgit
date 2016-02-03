@@ -43,7 +43,7 @@ fn create_negotiation_request(capabilities: &[&str], refs: &[GitRef]) -> String 
         let line: String = ["want ", &o[..], "\n"].concat();
         lines.push(pktline(&line[..]));
     }
-    lines.push("0000".to_string());
+    lines.push("0000".to_owned());
     lines.push(pktline("done\n"));
     lines.concat()
 }
@@ -75,7 +75,7 @@ fn parse_first_line(line: &str) -> (Vec<String>, GitRef) {
         .split('\0')
         .collect::<Vec<_>>();
     let the_ref = parse_line(split[0]);
-    let capabilities = split[1].split(' ').map(|s| s.to_string()).collect::<Vec<_>>();
+    let capabilities = split[1].split(' ').map(|s| s.to_owned()).collect::<Vec<_>>();
     (capabilities, the_ref)
 }
 
@@ -100,7 +100,7 @@ fn receive<R: Read>(reader: &mut R) -> io::Result<Vec<String>> {
     loop {
         match read_packet_line(reader) {
             Ok(Some(line)) => {
-                let s: String = str::from_utf8(&line[..]).unwrap().to_string();
+                let s: String = str::from_utf8(&line[..]).unwrap().to_owned();
                 lines.push(s)
             }
             Ok(None)       => return Ok(lines),
@@ -124,7 +124,7 @@ pub fn receive_with_sideband<R: Read>(reader: &mut R) -> io::Result<Vec<u8>> {
     loop {
         match try!(read_packet_line(reader)) {
             Some(line) => {
-                if &line[..] == "NAK\n".as_bytes() {
+                if &line[..] == b"NAK\n" {
                     continue;
                 }
                 match line[0] {

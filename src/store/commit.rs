@@ -1,4 +1,4 @@
-use nom::{IResult, Err, rest, newline, line_ending};
+use nom::{IResult, rest, newline, line_ending};
 
 use std::str;
 
@@ -26,12 +26,12 @@ impl Commit {
         if let IResult::Done(_, raw_parts) = parse_commit_inner(&raw.content[..]) {
             let (tree, parents, author, committer, message) = raw_parts;
             Some(Commit {
-                tree: tree.to_string(),
+                tree: tree.to_owned(),
                 parents: parents,
                 author: author,
                 committer: committer,
                 sha: raw.sha(),
-                message: message.to_string()
+                message: message.to_owned()
             })
         } else {
             println!("failed to parse commit... :(");
@@ -47,9 +47,9 @@ named!(parse_person<&[u8],Person>,
         ts: map_res!(take_until_and_consume!("\n"), str::from_utf8),
         || {
             Person {
-                name: name.to_string(),
-                email: email.to_string(),
-                timestamp: ts.to_string()
+                name: name.to_owned(),
+                email: email.to_owned(),
+                timestamp: ts.to_owned()
             }
         }
     )
@@ -61,11 +61,11 @@ fn parse_commit(input: &[u8], sha: String) -> IResult<&[u8], Commit> {
         IResult::Done(buf, raw_parts) => {
             let (tree, parents, author, committer, message) = raw_parts;
             IResult::Done(buf, Commit {
-                tree: tree.to_string(),
+                tree: tree.to_owned(),
                 parents: parents,
                 author: author,
                 committer: committer,
-                message: message.to_string(),
+                message: message.to_owned(),
                 sha: sha
             })
         },
@@ -84,7 +84,7 @@ named!(parse_commit_inner<&[u8], (&str, Vec<String>, Person, Person, &str)>,
             tag!("parent ") ~
             parent: map_res!(take!(40), str::from_utf8) ~
             newline ,
-            || { parent.to_string() }
+            || { parent.to_owned() }
         )
     ) ~
     tag!("author ") ~
@@ -121,7 +121,7 @@ fn test_commit_parsing() {
         committer The Committer <commiter@devs.com> 1353116070 +1100\n\
         \n\
         Bump version to 1.6";
-    let sha = "sha".to_string();
+    let sha = "sha".to_owned();
 
     if let IResult::Done(_, commit) = parse_commit(input.as_bytes(), sha) {
         assert_eq!(commit.tree, "tree456789012345678901234567890123456789");

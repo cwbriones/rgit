@@ -78,7 +78,7 @@ fn main() {
         Some(s @ "clone") => {
             let matches = app_matches.subcommand_matches(s).unwrap();
             let repo = matches.value_of("repo").unwrap();
-            let dir  = matches.value_of("dir").map(|s| s.to_string());
+            let dir  = matches.value_of("dir").map(|s| s.to_owned());
             remote_ops::clone_priv(repo, dir)
         },
         Some(s @ "clone-ssh") => {

@@ -1,6 +1,5 @@
 use ssh2::{Session};
 
-use std::io;
 use std::io::Write;
 use std::io::Result as IoResult;
 use std::net::TcpStream;
@@ -10,7 +9,7 @@ use super::GitClient;
 
 pub struct GitSSHClient {
     sess: Session,
-    stream: TcpStream,
+    _stream: TcpStream,
     repo: String
 }
 
@@ -28,8 +27,8 @@ impl GitSSHClient {
 
         GitSSHClient {
             sess: sess,
-            stream: stream,
-            repo: repo.to_string(),
+            _stream: stream,
+            repo: repo.to_owned(),
         }
     }
 }
