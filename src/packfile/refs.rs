@@ -10,7 +10,7 @@ pub struct GitRef {
     pub name: String,
 }
 
-pub fn create_refs(repo: &str, refs: &Vec<GitRef>) -> IoResult<()> {
+pub fn create_refs(repo: &str, refs: &[GitRef]) -> IoResult<()> {
     let (tags, branches): (Vec<_>, Vec<_>) = refs.iter()
         .filter(|r| !r.name.ends_with("^{}"))
         .partition(|r| {
@@ -22,7 +22,7 @@ pub fn create_refs(repo: &str, refs: &Vec<GitRef>) -> IoResult<()> {
     Ok(())
 }
 
-fn write_refs(repo: &str, parent_path: &str, refs: &Vec<&GitRef>) -> IoResult<()> {
+fn write_refs(repo: &str, parent_path: &str, refs: &[&GitRef]) -> IoResult<()> {
     let mut path = PathBuf::new();
     path.push(parent_path);
 
@@ -35,13 +35,12 @@ fn write_refs(repo: &str, parent_path: &str, refs: &Vec<&GitRef>) -> IoResult<()
     Ok(())
 }
 
-pub fn update_head(repo: &str, refs: &Vec<GitRef>) -> IoResult<()> {
+pub fn update_head(repo: &str, refs: &[GitRef]) -> IoResult<()> {
     if let Some(head) = refs.iter().find(|r| r.name == "HEAD") {
         let sha1 = &head.id;
         let true_ref = refs.iter().find(|r| r.name != "HEAD" && r.id == *sha1);
         let dir = true_ref
-            .map(|r| &r.name[..])
-            .unwrap_or("refs/heads/master");
+            .map_or("refs/heads/master", |r| &r.name[..]);
         try!(create_ref(repo, dir, &sha1));
         try!(create_sym_ref(repo, "HEAD", dir));
     }

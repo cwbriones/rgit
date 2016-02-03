@@ -1,6 +1,6 @@
 use nom::{IResult,space};
 
-use std::str;
+use std::str::{self, FromStr};
 use std::vec::Vec;
 use rustc_serialize::hex::ToHex;
 
@@ -43,14 +43,15 @@ impl Tree {
     }
 }
 
-impl EntryMode {
-    fn from_str(mode: &str) -> Self {
+impl FromStr for EntryMode {
+    type Err = u8;
+    fn from_str(mode: &str) -> Result<Self, Self::Err> {
         match mode {
-            "100644" | "644" => EntryMode::Normal,
-            "100755" | "755" => EntryMode::Executable,
-            "120000" => EntryMode::Symlink,
-            "160000" => EntryMode::Gitlink,
-            "40000" => EntryMode::SubDirectory,
+            "100644" | "644" => Ok(EntryMode::Normal),
+            "100755" | "755" => Ok(EntryMode::Executable),
+            "120000" => Ok(EntryMode::Symlink),
+            "160000" => Ok(EntryMode::Gitlink),
+            "40000" => Ok(EntryMode::SubDirectory),
             _ => panic!("Unsupported file mode: {}", mode)
         }
     }
@@ -64,7 +65,7 @@ named!(parse_tree_entry <TreeEntry>,
         sha: take!(20),
         || {
             TreeEntry {
-                mode: EntryMode::from_str(mode),
+                mode: EntryMode::from_str(mode).unwrap(),
                 path: path.to_string(),
                 sha: sha.to_hex()
             }
@@ -84,7 +85,7 @@ fn test_parse_tree() {
         32, 82, 69, 65, 68, 77, 69, 46, 109, 100, 0, 189, 6, 31, 50, 207, 237, 81, 181, 168, 222, 145,
         109, 134, 186, 137, 235, 159, 208, 104, 242, 52, 48, 48, 48, 48, 32, 115, 114, 99, 0, 44, 153,
         32, 248, 175, 44, 114, 130, 179, 183, 191, 144, 34, 196, 7, 92, 15, 177, 105, 86];
-    if let IResult::Done(_, entries) = parse_tree_entries(&input) {
+    if let IResult::Done(_, _) = parse_tree_entries(&input) {
         ()
     } else {
         panic!("Failed to parse tree");

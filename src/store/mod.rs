@@ -20,7 +20,8 @@ use self::commit::Commit;
 
 pub struct Repo<'a> {
     dir: &'a str,
-    pack: PackFile
+    pack: PackFile,
+    _index: Option<PackIndex>,
 }
 
 impl<'a> Repo<'a> {
@@ -45,7 +46,8 @@ impl<'a> Repo<'a> {
 
         Ok(Repo {
             dir: dir,
-            pack: packfile
+            pack: packfile,
+            _index: Some(index)
         })
     }
 
@@ -162,7 +164,7 @@ pub fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
     let mut ref_file = try!(File::open(ref_path));
     let mut sha = String::new();
     try!(ref_file.read_to_string(&mut sha));
-    Ok(sha.trim().to_string())
+    Ok(sha.trim().to_owned())
 }
 
 #[derive(Debug)]
@@ -204,7 +206,7 @@ fn get_index_entry(path: &str, file_mode: EntryMode, sha: String) -> IoResult<In
         size: meta.size(),
         sha: decoded_sha,
         file_mode: file_mode,
-        path: relative_path.to_str().unwrap().to_string()
+        path: relative_path.to_str().unwrap().to_owned()
     })
 }
 
@@ -214,8 +216,8 @@ fn write_index(repo: &str, entries: &mut [IndexEntry]) -> IoResult<()> {
     path.push(".git");
     path.push("index");
     let mut idx_file = try!(File::create(path));
-    let mut encoded = try!(encode_index(entries));
-    try!(idx_file.write_all(&mut encoded[..]));
+    let encoded = try!(encode_index(entries));
+    try!(idx_file.write_all(&encoded[..]));
     Ok(())
 }
 
@@ -267,7 +269,7 @@ fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
         //
         // The -2 is because of the amount needed to compensate for the flags
         // only being 2 bytes.
-        let mut v: Vec<u8> = Vec::from_iter(path.as_bytes().iter().map(|u| *u));
+        let mut v: Vec<u8> = Vec::from_iter(path.as_bytes().iter().cloned());
         v.push(0u8);
         let padding_size = 8 - ((v.len() - 2) % 8);
         let padding = vec![0u8; padding_size];
@@ -314,6 +316,7 @@ pub fn sha1_hash(input: &[u8]) -> Vec<u8> {
     buf
 }
 
+#[allow(dead_code)]
 pub fn sha1_hash_iter<'a, I: Iterator<Item=&'a [u8]>>(inputs: I) -> Vec<u8> {
     use crypto::digest::Digest;
     use crypto::sha1::Sha1;
@@ -334,17 +337,6 @@ pub fn sha1_hash_hex(input: &[u8]) -> String {
     let mut hasher = Sha1::new();
     hasher.input(input);
 
-    hasher.result_str()
-}
-
-pub fn sha1_hash_all(inputs: &[&str]) -> String {
-    use crypto::digest::Digest;
-    use crypto::sha1::Sha1;
-
-    let mut hasher = Sha1::new();
-    for s in inputs {
-        hasher.input_str(s);
-    }
     hasher.result_str()
 }
 

@@ -68,6 +68,7 @@ impl PackFile {
         }
     }
 
+    #[allow(dead_code)]
     pub fn unpack_all(&self, repo: &str) -> IoResult<()> {
         for (_, object) in self.objects() {
             try!(object.write(repo))
@@ -101,7 +102,7 @@ impl PackFile {
 /// An iterator over the objects within a packfile, along
 /// with their offsets.
 ///
-struct Objects<'a> {
+pub struct Objects<'a> {
     cursor: Cursor<&'a [u8]>,
     remaining: usize,
     base_objects: HashMap<String, Object>,
@@ -205,13 +206,13 @@ fn read_object_content(in_data: &mut Cursor<&[u8]>, size: usize) -> Vec<u8> {
     let (content, new_pos) = {
       let mut z = ZlibDecoder::new(in_data.by_ref());
       let mut buf = Vec::with_capacity(size);
-      z.read_to_end(&mut buf).ok().expect("Error reading object contents");
+      z.read_to_end(&mut buf).expect("Error reading object contents");
       if size != buf.len() {
           panic!("Size does not match for expected object contents")
       }
       (buf, z.total_in() + current)
     };
-    in_data.seek(SeekFrom::Start(new_pos)).ok().expect("Error rewinding packfile data");
+    in_data.seek(SeekFrom::Start(new_pos)).expect("Error rewinding packfile data");
     content
 }
 
@@ -226,8 +227,8 @@ fn read_object_type<R>(r: &mut R, id: u8) -> Option<ObjectType> where R: Read {
         },
         7 => {
             let mut base: [u8; 20] = [0; 20];
-            for i in 0..20 {
-                base[i] = r.read_u8().unwrap();
+            for item in &mut base {
+                *item = r.read_u8().unwrap();
             }
             Some(ObjectType::RefDelta(base))
         }

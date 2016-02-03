@@ -17,6 +17,7 @@ hyper = "*"
 clap = "1.5.5"
 ssh2 = "0.2"
 crc = "1.2.0"
+clippy = "*"
 
 [[bin]]
 name = "rgit"

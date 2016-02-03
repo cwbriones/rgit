@@ -57,7 +57,7 @@ impl DeltaHeader {
 
             count += 1;
         }
-        return (size, count);
+        (size, count)
     }
 }
 
@@ -85,26 +85,13 @@ impl<'a> DeltaPatcher<'a> {
     }
 
     fn run_to_end(&mut self) -> Vec<u8> {
-        let mut result = Vec::with_capacity(self.target_len);
-        loop {
-            if let Some(buf) = self.next() {
-                result.extend(buf.into_iter());
-            } else {
-                break;
-            }
+        let target_len = self.target_len;
+        let mut result = Vec::with_capacity(target_len);
+        for buf in self {
+            result.extend_from_slice(&buf[..]);
         }
-        assert_eq!(result.len(), self.target_len);
+        assert_eq!(result.len(), target_len);
         result
-    }
-
-    fn next(&mut self) -> Option<Vec<u8>> {
-        if self.delta.len() > 0 {
-            let command = self.next_command();
-            let result = self.run_command(command);
-            Some(result)
-        } else {
-            None
-        }
     }
 
     fn next_command(&mut self) -> DeltaOp {
@@ -116,7 +103,7 @@ impl<'a> DeltaPatcher<'a> {
             let mut length = 0usize;
 
             // Read the offset to copy from
-            for &mask in [0x01, 0x02, 0x04, 0x08].iter() {
+            for mask in &[0x01, 0x02, 0x04, 0x08] {
                 if cmd & mask > 0 {
                     let byte = self.delta.read_u8().unwrap() as u64;
                     offset += (byte as usize) << shift;
@@ -126,7 +113,7 @@ impl<'a> DeltaPatcher<'a> {
 
             // Read the length of the copy
             shift = 0;
-            for &mask in [0x10, 0x20, 0x40].iter() {
+            for mask in &[0x10, 0x20, 0x40] {
                 if cmd & mask > 0 {
                     let byte = self.delta.read_u8().unwrap() as u64;
                     length += (byte << shift) as usize;
@@ -151,6 +138,18 @@ impl<'a> DeltaPatcher<'a> {
                 self.delta.read_exact(&mut buf).unwrap();
                 buf
             }
+        }
+    }
+}
+
+impl<'a> Iterator for DeltaPatcher<'a> {
+    type Item = Vec<u8>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.delta.is_empty() {
+            None
+        } else {
+            let command = self.next_command();
+            Some(self.run_command(command))
         }
     }
 }

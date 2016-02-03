@@ -30,11 +30,10 @@ use std::io;
 use std::io::{Write,Read};
 use std::io::Result as IoResult;
 use std::fs::File;
-use std::path::{Path,PathBuf};
+use std::path::Path;
 
 use store;
 use packfile::PackFile;
-use packfile::object::Object;
 
 type SHA = [u8; 20];
 
@@ -45,6 +44,7 @@ static VERSION: u32 = 2;
 /// Version 2 of the Git Packfile Index containing separate
 /// tables for the offsets, fanouts, and shas.
 ///
+#[allow(dead_code)]
 pub struct PackIndex {
     fanout: [u32; 256],
     offsets: Vec<u32>,
@@ -54,6 +54,7 @@ pub struct PackIndex {
 }
 
 impl PackIndex {
+    #[allow(dead_code)]
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let mut file = try!(File::open(path));
         let mut contents = Vec::new();
@@ -61,6 +62,7 @@ impl PackIndex {
         Self::parse(&contents)
     }
 
+    #[allow(dead_code)]
     pub fn parse(mut content: &[u8]) -> io::Result<Self> {
         let checksum = store::sha1_hash_hex(&content[..content.len() - 20]);
 
@@ -74,8 +76,8 @@ impl PackIndex {
 
         // Parse Fanout table
         let mut fanout = [0; 256];
-        for i in 0..256 {
-            fanout[i] = try!(content.read_u32::<BigEndian>());
+        for f in fanout.iter_mut() {
+            *f = try!(content.read_u32::<BigEndian>());
         }
         let size = fanout[255] as usize;
 
@@ -133,6 +135,7 @@ impl PackIndex {
     ///
     /// Encodes the index into binary format for writing.
     ///
+    #[allow(dead_code)]
     pub fn encode(&self) -> IoResult<Vec<u8>> {
         let size = self.shas.len();
         let total_size = (2 * 4) + 256 * 4 + size * 28;
@@ -190,8 +193,8 @@ impl PackIndex {
             let checksum = crc32::checksum_ieee(&obj.content);
             let fanout_start = sha[0] as usize;
             // By definition of the fanout table we need to increment every entry >= this sha
-            for j in fanout_start..256 {
-                fanout[j] += 1;
+            for f in fanout.iter_mut().skip(fanout_start) {
+                *f += 1;
             }
             shas[i] = sha;
             offsets[i] = offset as u32;
@@ -203,13 +206,14 @@ impl PackIndex {
             offsets: offsets,
             shas: shas,
             checksums: checksums,
-            pack_sha: pack.sha().to_string()
+            pack_sha: pack.sha().to_owned()
         }
     }
 
     ///
     /// Returns the offset in the packfile for the given SHA, if any.
     ///
+    #[allow(dead_code)]
     pub fn find(&self, sha: &[u8]) -> Option<usize> {
         let fan = sha[0] as usize;
         let start = if fan > 0 {
@@ -255,10 +259,10 @@ mod tests {
     #[test]
     fn finding_an_offset() {
         let index = PackIndex::parse(IDX_FILE).unwrap();
-        let SHA = COMMIT.from_hex().unwrap();
+        let sha = COMMIT.from_hex().unwrap();
         let bad_sha = "abcdefabcdefabcdefabcdefabcdefabcd".from_hex().unwrap();
 
-        assert_eq!(index.find(&SHA[..]), Some(458));
+        assert_eq!(index.find(&sha[..]), Some(458));
         assert_eq!(index.find(&bad_sha), None);
     }
 }

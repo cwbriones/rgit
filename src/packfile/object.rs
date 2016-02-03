@@ -36,13 +36,14 @@ pub enum ObjectType {
 }
 
 impl Object {
+    #[allow(dead_code)]
     pub fn read_from_disk(repo: &str, sha1: &str) -> IoResult<Self> {
         let path = object_path(repo, sha1);
 
         let mut inflated = Vec::new();
         let file = try!(File::open(path));
         let mut z = ZlibDecoder::new(file);
-        z.read_to_end(&mut inflated).ok().expect("Error inflating object");
+        z.read_to_end(&mut inflated).expect("Error inflating object");
 
         let sha1_checksum = store::sha1_hash_hex(&inflated);
         assert_eq!(sha1_checksum, sha1);
@@ -70,7 +71,7 @@ impl Object {
         if let Some(mut blob) = self.header() {
             // TODO: Update since this was because I couldn't use 
             // Vec::extend or push_all
-            for c in self.content.iter() {
+            for c in &self.content {
                 blob.push(*c)
             }
             (store::sha1_hash_hex(&blob[..]), blob)
