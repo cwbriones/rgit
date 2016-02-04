@@ -1,5 +1,9 @@
 mod commit;
 mod tree;
+mod object;
+
+pub use store::object::Object as GitObject;
+pub use store::object::ObjectType as GitObjectType;
 
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
@@ -13,8 +17,8 @@ use byteorder::{BigEndian, WriteBytesExt};
 
 use rustc_serialize::hex::FromHex;
 
-use packfile::object::{Object,ObjectType};
 use packfile::{PackFile, PackIndex};
+
 use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
 
@@ -67,11 +71,11 @@ impl<'a> Repo<'a> {
     pub fn walk(&self, sha: &str) -> Option<Tree> {
         self.read_object(sha).ok().and_then(|object| {
             match object.obj_type {
-                ObjectType::Commit => {
-                    Commit::from_packfile_object(object).and_then(|c| self.extract_tree(&c))
+                GitObjectType::Commit => {
+                    object.as_commit().and_then(|c| self.extract_tree(&c))
                 },
-                ObjectType::Tree => {
-                    Tree::from_packfile_object(object)
+                GitObjectType::Tree => {
+                    object.as_tree()
                 },
                 _ => None
             }
@@ -98,7 +102,6 @@ impl<'a> Repo<'a> {
                 },
                 EntryMode::Normal | EntryMode::Executable => {
                     let object = try!(self.read_object(sha));
-                    // FIXME: Need to properly set the file mode here.
                     let mut file = try!(File::create(&full_path));
                     try!(file.write_all(&object.content[..]));
                     let meta = try!(file.metadata());
@@ -129,14 +132,15 @@ impl<'a> Repo<'a> {
     }
 
     fn read_tree(&self, sha: &str) -> Option<Tree> {
-        self.read_object(sha).ok().and_then(|object| {
-            Tree::from_packfile_object(object)
+        self.read_object(sha).ok().and_then(|obj| {
+            obj.as_tree()
         })
     }
 
-    pub fn read_object(&self, sha: &str) -> IoResult<&Object> {
-        let object = self.pack.find_by_sha(sha).unwrap();
-        Ok(object)
+    pub fn read_object(&self, sha: &str) -> IoResult<GitObject> {
+        let object = 
+            self.pack.find_by_sha(sha).and_then(GitObject::from_raw);
+        Ok(object.unwrap())
     }
 }
 

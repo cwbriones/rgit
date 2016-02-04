@@ -2,8 +2,6 @@ use nom::{IResult, rest, newline, line_ending};
 
 use std::str;
 
-use packfile;
-
 #[derive(Debug)]
 pub struct Person {
     name: String,
@@ -15,26 +13,23 @@ pub struct Person {
 pub struct Commit {
     pub tree: String,
     parents: Vec<String>,
-    sha: String,
     author: Person,
     committer: Person,
     message: String
 }
 
 impl Commit {
-    pub fn from_packfile_object(raw: &packfile::Object) -> Option<Self> {
-        if let IResult::Done(_, raw_parts) = parse_commit_inner(&raw.content[..]) {
+    pub fn parse(content: &[u8]) -> Option<Self> {
+        if let IResult::Done(_, raw_parts) = parse_commit_inner(content) {
             let (tree, parents, author, committer, message) = raw_parts;
             Some(Commit {
                 tree: tree.to_owned(),
                 parents: parents,
                 author: author,
                 committer: committer,
-                sha: raw.sha(),
                 message: message.to_owned()
             })
         } else {
-            println!("failed to parse commit... :(");
             None
         }
     }
@@ -54,25 +49,6 @@ named!(parse_person<&[u8],Person>,
         }
     )
 );
-
-#[allow(unused)]
-fn parse_commit(input: &[u8], sha: String) -> IResult<&[u8], Commit> {
-    match parse_commit_inner(input) {
-        IResult::Done(buf, raw_parts) => {
-            let (tree, parents, author, committer, message) = raw_parts;
-            IResult::Done(buf, Commit {
-                tree: tree.to_owned(),
-                parents: parents,
-                author: author,
-                committer: committer,
-                message: message.to_owned(),
-                sha: sha
-            })
-        },
-        IResult::Incomplete(needed) => IResult::Incomplete(needed),
-        IResult::Error(e) => IResult::Error(e)
-    }
-}
 
 named!(parse_commit_inner<&[u8], (&str, Vec<String>, Person, Person, &str)>,
   chain!(
@@ -121,9 +97,8 @@ fn test_commit_parsing() {
         committer The Committer <commiter@devs.com> 1353116070 +1100\n\
         \n\
         Bump version to 1.6";
-    let sha = "sha".to_owned();
 
-    if let IResult::Done(_, commit) = parse_commit(input.as_bytes(), sha) {
+    if let Some(commit) = Commit::parse(input.as_bytes()) {
         assert_eq!(commit.tree, "tree456789012345678901234567890123456789");
         let parents = vec![
             "parentone012345678901234567890123456789a",

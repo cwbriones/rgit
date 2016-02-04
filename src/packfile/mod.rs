@@ -1,4 +1,10 @@
-use delta;
+pub mod refs;
+mod object;
+mod index;
+
+pub use self::object::Object as PackObject;
+pub use self::object::ObjectType as PackObjectType;
+pub use self::index::PackIndex;
 
 use flate2::read::ZlibDecoder;
 use rustc_serialize::hex::ToHex;
@@ -10,23 +16,17 @@ use std::io::Result as IoResult;
 use std::collections::HashMap;
 
 use store;
+use delta;
+use self::object::ObjectType::*;
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
-
-pub mod refs;
-pub mod object;
-mod index;
-
-pub use self::object::Object;
-pub use self::object::ObjectType;
-pub use self::index::PackIndex;
 
 // The fields version and num_objects are currently unused
 #[allow(dead_code)]
 pub struct PackFile {
     version: u32,
     num_objects: usize,
-    objects: HashMap<String, Object>,
+    objects: HashMap<String, PackObject>,
     encoded_objects: Vec<u8>,
     sha: String,
 }
@@ -84,8 +84,8 @@ impl PackFile {
         Objects::new(&self.encoded_objects, self.num_objects)
     }
 
-    pub fn find_by_sha(&self, sha: &str) -> Option<&Object> {
-        self.objects.get(sha)
+    pub fn find_by_sha(&self, sha: &str) -> Option<PackObject> {
+        self.objects.get(sha).cloned()
     }
 
     pub fn sha(&self) -> &str {
@@ -105,8 +105,8 @@ impl PackFile {
 pub struct Objects<'a> {
     cursor: Cursor<&'a [u8]>,
     remaining: usize,
-    base_objects: HashMap<String, Object>,
-    ref_deltas: Vec<(usize, String, Object)>,
+    base_objects: HashMap<String, PackObject>,
+    ref_deltas: Vec<(usize, String, PackObject)>,
     resolve: bool,
 }
 
@@ -121,7 +121,7 @@ impl<'a> Objects<'a> {
         }
     }
 
-    fn read_object(&mut self) -> Object {
+    fn read_object(&mut self) -> PackObject {
         let mut c = self.cursor.read_u8().unwrap();
         let type_id = (c >> 4) & 7;
 
@@ -142,7 +142,7 @@ impl<'a> Objects<'a> {
             );
         let content = read_object_content(&mut self.cursor, size);
 
-        Object {
+        PackObject {
             obj_type: obj_type,
             content: content
         }
@@ -150,7 +150,7 @@ impl<'a> Objects<'a> {
 }
 
 impl<'a> Iterator for Objects<'a> {
-    type Item = (usize, Object);
+    type Item = (usize, PackObject);
 
     fn next(&mut self) -> Option<Self::Item> {
         // First yield all the base objects
@@ -160,11 +160,11 @@ impl<'a> Iterator for Objects<'a> {
             let object = self.read_object();
 
             match object.obj_type {
-                ObjectType::RefDelta(base) => {
+                RefDelta(base) => {
                     let hex_base = base.to_hex();
                     self.ref_deltas.push((offset, hex_base, object));
                 },
-                ObjectType::OfsDelta(_) => (),
+                OfsDelta(_) => (),
                 _ => {
                     let sha = object.sha();
                     self.base_objects.insert(sha, object.clone());
@@ -182,7 +182,7 @@ impl<'a> Iterator for Objects<'a> {
                 let patched = {
                     let base_object = self.base_objects.get(&base).unwrap();
                     let source = &base_object.content[..];
-                    Object {
+                    PackObject {
                         obj_type: base_object.obj_type,
                         content: delta::patch(source, &delta.content[..])
                     }
@@ -216,21 +216,22 @@ fn read_object_content(in_data: &mut Cursor<&[u8]>, size: usize) -> Vec<u8> {
     content
 }
 
-fn read_object_type<R>(r: &mut R, id: u8) -> Option<ObjectType> where R: Read {
+// FIXME: This should return IoResult with the only error being UnexpectedEof
+fn read_object_type<R>(r: &mut R, id: u8) -> Option<PackObjectType> where R: Read {
     match id {
-        1 => Some(ObjectType::Commit),
-        2 => Some(ObjectType::Tree),
-        3 => Some(ObjectType::Blob),
-        4 => Some(ObjectType::Tag),
+        1 => Some(Commit),
+        2 => Some(Tree),
+        3 => Some(Blob),
+        4 => Some(Tag),
         6 => {
-            Some(ObjectType::OfsDelta(read_offset(r)))
+            Some(OfsDelta(read_offset(r)))
         },
         7 => {
             let mut base: [u8; 20] = [0; 20];
             for item in &mut base {
                 *item = r.read_u8().unwrap();
             }
-            Some(ObjectType::RefDelta(base))
+            Some(RefDelta(base))
         }
         _ => None
     }

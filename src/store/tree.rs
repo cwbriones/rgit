@@ -4,10 +4,7 @@ use std::str::{self, FromStr};
 use std::vec::Vec;
 use rustc_serialize::hex::ToHex;
 
-use packfile;
-
 pub struct Tree {
-    pub sha: String,
     pub entries: Vec<TreeEntry>
 }
 
@@ -28,17 +25,13 @@ pub enum EntryMode {
 }
 
 impl Tree {
-    pub fn from_packfile_object(raw: &packfile::Object) -> Option<Self> {
-        match parse_tree_entries(&raw.content[..]) {
-            IResult::Done(_, entries) => {
-                Some(Tree {
-                    entries: entries,
-                    sha: raw.sha()
-                })
-            },
-            _ => {
-                None
-            }
+    pub fn parse(content: &[u8]) -> Option<Self> {
+        if let IResult::Done(_, entries) = parse_tree_entries(content) {
+            Some(Tree {
+                entries: entries
+            })
+        } else {
+            None
         }
     }
 }
