@@ -39,14 +39,21 @@ impl<'a> Repo<'a> {
         p.push("pack");
         try!(fs::create_dir_all(&p));
         p.push(format!("pack-{}", packfile.sha()));
-        p.set_extension("pack");
 
-        try!(packfile.unpack_all(dir));
+        let mut pack_path = p.clone();
+        pack_path.set_extension("pack");
 
-        let mut file = try!(File::create(&p));
-        try!(file.write_all(&packfile_data[..]));
+        let mut idx_path = p.clone();
+        idx_path.set_extension("idx");
+
+        let mut file = try!(File::create(&pack_path));
+        let mut idx_file = try!(File::create(&idx_path));
 
         let index = PackIndex::from_packfile(&packfile);
+        let encoded_idx = try!(index.encode());
+
+        try!(file.write_all(&packfile_data[..]));
+        try!(idx_file.write_all(&encoded_idx[..]));
 
         Ok(Repo {
             dir: dir,

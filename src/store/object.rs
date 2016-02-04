@@ -75,7 +75,7 @@ impl Object {
         };
 
         let mut footer = Vec::new();
-        footer.extend(inflated.into_iter().skip(split_idx+1));
+        footer.extend_from_slice(&inflated[split_idx+1..]);
 
         assert_eq!(footer.len(), size);
 

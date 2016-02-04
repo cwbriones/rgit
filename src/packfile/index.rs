@@ -44,7 +44,6 @@ static VERSION: u32 = 2;
 /// Version 2 of the Git Packfile Index containing separate
 /// tables for the offsets, fanouts, and shas.
 ///
-#[allow(dead_code)]
 pub struct PackIndex {
     fanout: [u32; 256],
     offsets: Vec<u32>,
@@ -90,7 +89,6 @@ impl PackIndex {
         }
 
         // Parse N Checksums
-        println!("Reading checksums.");
         let mut checksums = Vec::with_capacity(size);
         for _ in 0..size {
             let crc = try!(content.read_u32::<BigEndian>());
@@ -110,16 +108,6 @@ impl PackIndex {
 
         let mut idx_sha = [0; 20];
         try!(content.read_exact(&mut idx_sha));
-
-        {
-            println!("Checking shas");
-            let shas_hex = shas.iter().map(|s| s.to_hex()).collect::<Vec<_>>().join("");
-            //let check = store::sha1_hash_iter(shas_hex.iter().map(|s| s.as_bytes()));
-            let from = shas_hex.from_hex().unwrap();
-            let check = store::sha1_hash_hex(&from[..]);
-            println!("got  {}", check);
-            println!("pack {}", pack_sha.to_hex());
-        }
 
         assert_eq!(idx_sha.to_hex(), checksum);
 
@@ -232,24 +220,53 @@ impl PackIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustc_serialize::hex::FromHex;
+    use rustc_serialize::hex::{FromHex,ToHex};
+    use std::fs::File;
+    use std::io::Read;
 
-    static IDX_FILE: &'static [u8] =
-        include_bytes!(
-            "../../tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.idx"
-        );
+    use packfile::PackFile;
+
+    static IDX_FILE: &'static str =
+        "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.idx";
+
+    static PACK_FILE: &'static str =
+        "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.pack";
 
     static COMMIT: &'static str = "fb6fb3d9b81142566f4b2466857b0302617768de";
 
     #[test]
     fn reading_an_index() {
-        let bytes = IDX_FILE;
+        let mut bytes = Vec::new();
+        let mut file = File::open(IDX_FILE).unwrap();
+        file.read_to_end(&mut bytes).unwrap();
         PackIndex::parse(&bytes[..]).unwrap();
     }
 
     #[test]
+    fn creating_an_index() {
+        // Create an index from the associated packfile
+        let file = File::open(PACK_FILE).unwrap();
+        let pack = PackFile::from_file(file).unwrap();
+        let index = PackIndex::from_packfile(&pack);
+
+        // Read the index associated with the packfile
+        let mut bytes = Vec::new();
+        let mut file = File::open(IDX_FILE).unwrap();
+        file.read_to_end(&mut bytes).unwrap();
+        let test_idx = PackIndex::parse(&bytes[..]).unwrap();
+
+        let idx_shas = index.shas.iter().map(|s| s.to_hex()).collect::<Vec<_>>();
+        let test_shas = test_idx.shas.iter().map(|s| s.to_hex()).collect::<Vec<_>>();
+        assert_eq!(idx_shas.len(), test_shas.len());
+        assert_eq!(idx_shas, test_shas);
+    }
+
+    #[test]
     fn read_and_write_should_be_inverses() {
-        let bytes = IDX_FILE;
+        let mut bytes = Vec::new();
+        let mut file = File::open(IDX_FILE).unwrap();
+        file.read_to_end(&mut bytes).unwrap();
+        PackIndex::parse(&bytes[..]).unwrap();
 
         let idx = PackIndex::parse(&bytes[..]).unwrap();
         let encoded = idx.encode().unwrap();
@@ -258,7 +275,10 @@ mod tests {
 
     #[test]
     fn finding_an_offset() {
-        let index = PackIndex::parse(IDX_FILE).unwrap();
+        let mut bytes = Vec::new();
+        let mut file = File::open(IDX_FILE).unwrap();
+        file.read_to_end(&mut bytes).unwrap();
+        let index = PackIndex::parse(&bytes[..]).unwrap();
         let sha = COMMIT.from_hex().unwrap();
         let bad_sha = "abcdefabcdefabcdefabcdefabcdefabcd".from_hex().unwrap();
 
