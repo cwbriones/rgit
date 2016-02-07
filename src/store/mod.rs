@@ -138,9 +138,7 @@ impl<'a> Repo<'a> {
     }
 
     pub fn read_object(&self, sha: &str) -> IoResult<GitObject> {
-        let object = 
-            self.pack.find_by_sha(sha).and_then(GitObject::from_raw);
-        Ok(object.unwrap())
+        Ok(self.pack.find_by_sha(sha).unwrap())
     }
 }
 
@@ -159,7 +157,11 @@ pub fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
     let mut contents = String::new();
     let mut file = try!(File::open(sym_path));
     try!(file.read_to_string(&mut contents));
-    let the_ref = contents.split("ref: ").skip(1).next().unwrap().trim();
+    let the_ref = contents.split("ref: ")
+        .skip(1)
+        .next()
+        .unwrap()
+        .trim();
 
     // Read the SHA out of the actual ref
     let mut ref_path = root.clone();

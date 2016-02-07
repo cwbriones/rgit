@@ -1,9 +1,6 @@
 pub mod refs;
-mod object;
 mod index;
 
-pub use self::object::Object as PackObject;
-pub use self::object::ObjectType as PackObjectType;
 pub use self::index::PackIndex;
 
 use flate2::read::ZlibDecoder;
@@ -16,8 +13,8 @@ use std::io::Result as IoResult;
 use std::collections::HashMap;
 
 use store;
+use store::{GitObject, GitObjectType};
 use delta;
-use self::object::ObjectType::*;
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 
@@ -26,9 +23,18 @@ static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 pub struct PackFile {
     version: u32,
     num_objects: usize,
-    objects: HashMap<String, PackObject>,
+    objects: HashMap<String, GitObject>,
     encoded_objects: Vec<u8>,
     sha: String,
+}
+
+///
+/// An object in the packfile, which may or may not be delta encoded.
+///
+pub enum PackObject {
+    Base(GitObject),
+    OfsDelta(u64, Vec<u8>),
+    RefDelta([u8; 20], Vec<u8>),
 }
 
 impl PackFile {
@@ -84,18 +90,18 @@ impl PackFile {
         Objects::new(&self.encoded_objects, self.num_objects)
     }
 
-    pub fn find_by_sha(&self, sha: &str) -> Option<PackObject> {
+    pub fn find_by_sha(&self, sha: &str) -> Option<GitObject> {
         self.objects.get(sha).cloned()
     }
 
     pub fn sha(&self) -> &str {
         &self.sha
     }
-//
-//    pub fn find_by_offset(&self, offset: usize) -> Option<Object> {
-//        let mut cursor = Cursor::new(self.encoded_objects);
-//        cursor.seek(offset as u64);
-//    }
+
+    //pub fn find_by_offset(&self, offset: usize) -> Option<GitObject> {
+    //    let mut cursor = Cursor::new(self.encoded_objects);
+    //    cursor.seek(offset as u64);
+    //}
 }
 
 ///
@@ -105,8 +111,8 @@ impl PackFile {
 pub struct Objects<'a> {
     cursor: Cursor<&'a [u8]>,
     remaining: usize,
-    base_objects: HashMap<String, PackObject>,
-    ref_deltas: Vec<(usize, String, PackObject)>,
+    base_objects: HashMap<String, GitObject>,
+    ref_deltas: Vec<(usize, PackObject)>,
     resolve: bool,
 }
 
@@ -137,20 +143,36 @@ impl<'a> Objects<'a> {
             shift += 7;
         }
 
-        let obj_type = read_object_type(&mut self.cursor, type_id).expect(
-            "Error parsing object type in packfile"
-            );
-        let content = read_object_content(&mut self.cursor, size);
-
-        PackObject {
-            obj_type: obj_type,
-            content: content
+        match type_id {
+            1 | 2 | 3 | 4 => {
+                let content = read_object_content(&mut self.cursor, size);
+                let base_type = match type_id {
+                    1 => GitObjectType::Commit,
+                    2 => GitObjectType::Tree,
+                    3 => GitObjectType::Blob,
+                    4 => GitObjectType::Tag,
+                    _ => unreachable!()
+                };
+                PackObject::Base(GitObject::new(base_type, content))
+            },
+            6 => {
+                let offset = read_offset(&mut self.cursor);
+                let content = read_object_content(&mut self.cursor, size);
+                PackObject::OfsDelta(offset, content)
+            },
+            7 => {
+                let mut base: [u8; 20] = [0; 20];
+                self.cursor.read_exact(&mut base).unwrap();
+                let content = read_object_content(&mut self.cursor, size);
+                PackObject::RefDelta(base, content)
+            }
+            _ => panic!("Unexpected id for git object")
         }
     }
 }
 
 impl<'a> Iterator for Objects<'a> {
-    type Item = (usize, PackObject);
+    type Item = (usize, GitObject);
 
     fn next(&mut self) -> Option<Self::Item> {
         // First yield all the base objects
@@ -159,16 +181,15 @@ impl<'a> Iterator for Objects<'a> {
             let offset = self.cursor.position() as usize;
             let object = self.read_object();
 
-            match object.obj_type {
-                RefDelta(base) => {
-                    let hex_base = base.to_hex();
-                    self.ref_deltas.push((offset, hex_base, object));
-                },
-                OfsDelta(_) => (),
-                _ => {
-                    let sha = object.sha();
-                    self.base_objects.insert(sha, object.clone());
-                    return Some((offset, object))
+            match object {
+                PackObject::OfsDelta(_, _) => (),
+                PackObject::RefDelta(_, _) => self.ref_deltas.push((offset, object)),
+                PackObject::Base(base) => {
+                    {
+                        let sha = base.sha();
+                        self.base_objects.insert(sha, base.clone());
+                    }
+                    return Some((offset, base))
                 },
             }
         }
@@ -178,19 +199,23 @@ impl<'a> Iterator for Objects<'a> {
         }
         // Then resolve and yield all the delta objects
         match self.ref_deltas.pop() {
-            Some((offset, base, delta)) => {
+            Some((offset, PackObject::RefDelta(base, patch))) => {
                 let patched = {
-                    let base_object = self.base_objects.get(&base).unwrap();
+                    let sha = base.to_hex();
+                    let base_object = self.base_objects.get(&sha).unwrap();
                     let source = &base_object.content[..];
-                    PackObject {
-                        obj_type: base_object.obj_type,
-                        content: delta::patch(source, &delta.content[..])
-                    }
+                    GitObject::new(
+                        base_object.obj_type,
+                        delta::patch(source, &patch)
+                    )
                 };
-                let sha = patched.sha();
-                self.base_objects.insert(sha, patched.clone());
+                {
+                    let sha = patched.sha();
+                    self.base_objects.insert(sha, patched.clone());
+                }
                 Some((offset, patched))
             },
+            Some((_, _)) => unreachable!(),
             None => None
         }
     }
@@ -216,40 +241,19 @@ fn read_object_content(in_data: &mut Cursor<&[u8]>, size: usize) -> Vec<u8> {
     content
 }
 
-// FIXME: This should return IoResult with the only error being UnexpectedEof
-fn read_object_type<R>(r: &mut R, id: u8) -> Option<PackObjectType> where R: Read {
-    match id {
-        1 => Some(Commit),
-        2 => Some(Tree),
-        3 => Some(Blob),
-        4 => Some(Tag),
-        6 => {
-            Some(OfsDelta(read_offset(r)))
-        },
-        7 => {
-            let mut base: [u8; 20] = [0; 20];
-            for item in &mut base {
-                *item = r.read_u8().unwrap();
-            }
-            Some(RefDelta(base))
-        }
-        _ => None
-    }
-}
-
 // Offset encoding.
 // n bytes with MSB set in all but the last one.
 // The offset is then the number constructed
 // by concatenating the lower 7 bits of each byte, and
 // for n >= 2 adding 2^7 + 2^14 + ... + 2^(7*(n-1))
 // to the result.
-fn read_offset<R>(r: &mut R) -> u8 where R: Read {
+fn read_offset<R>(r: &mut R) -> u64 where R: Read {
     let mut shift = 0;
     let mut c = 0x80;
-    let mut offset = 0;
+    let mut offset: u64 = 0;
     while c & 0x80 > 0 {
         c = r.read_u8().unwrap();
-        offset += (c & 0x7f) << shift;
+        offset += ((c & 0x7f) as u64) << shift;
         shift += 7;
     }
     offset
