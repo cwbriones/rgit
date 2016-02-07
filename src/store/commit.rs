@@ -125,10 +125,7 @@ mod tests {
             committer The Committer <commiter@devs.com> 1353116070 +1100\n\
             \n\
             Bump version to 1.6";
-        let object = GitObject {
-            obj_type: GitObjectType::Commit,
-            content: (&input[..]).to_owned(),
-        };
+        let object = GitObject::new(GitObjectType::Commit, (&input[..]).to_owned());
         if let Some(commit) = Commit::from_raw(&object) {
             assert_eq!(commit.tree, "tree456789012345678901234567890123456789");
             let parents = vec![
