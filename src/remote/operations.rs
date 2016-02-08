@@ -68,6 +68,8 @@ pub fn clone_ssh_priv(host: &str, user: &str, repo: &str) -> IoResult<()> {
 pub fn log(revision: Option<&str>) -> IoResult<()> {
     let repo = try!(Repo::from_enclosing());
     let rev = revision.unwrap_or("HEAD");
+    // Refactor this into a commit walker and pass a closure that calls
+    // std::process::Command::new("less") to pipe it
     try!(repo.log(&rev));
     Ok(())
 }

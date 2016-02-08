@@ -9,10 +9,10 @@ use std::io::{Read,Write};
 use std::path::PathBuf;
 use std::cell::RefCell;
 
-use packfile::PackObject;
 use store;
 use store::commit::Commit;
 use store::tree::Tree;
+use delta;
 
 ///
 /// A type of loose object found in the database.
@@ -44,13 +44,11 @@ impl Object {
         }
     }
 
-    ///
-    /// Extracts the object from a non-deltafied PackObject.
-    ///
-    pub fn from_raw(raw: PackObject) -> Option<Self> {
-        match raw {
-            PackObject::Base(o) => Some(o),
-            _ => None
+    pub fn patch(&self, patch: &[u8]) -> Self {
+        Object {
+            obj_type: self.obj_type,
+            content: delta::patch(&self.content, &patch),
+            sha: RefCell::new(None)
         }
     }
 
@@ -116,6 +114,7 @@ impl Object {
     ///
     /// Encodes this object and writes it to the repo's database.
     ///
+    #[allow(unused)]
     pub fn write(&self, repo: &str) -> IoResult<()> {
         let (sha1, blob) = self.encode();
         let path = object_path(repo, &sha1);

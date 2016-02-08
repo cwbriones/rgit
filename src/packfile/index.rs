@@ -22,7 +22,6 @@
 //   Yes
 //      2. Read and return
 //
-use crc::crc32;
 use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
 use rustc_serialize::hex::{FromHex,ToHex};
 
@@ -33,7 +32,7 @@ use std::fs::File;
 use std::path::Path;
 
 use store;
-use packfile::PackFile;
+use packfile::Objects;
 
 type SHA = [u8; 20];
 
@@ -53,16 +52,25 @@ pub struct PackIndex {
 }
 
 impl PackIndex {
-    #[allow(dead_code)]
-    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let mut file = try!(File::open(path));
+    #[allow(unused)]
+    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Option<Self>> {
+        use std::io::Error as IoError;
+        use std::io::ErrorKind;
+
+        let mut file = match File::open(path) {
+            Ok(file) => file,
+            Err(ref io_error @ IoError{..}) if ErrorKind::NotFound == io_error.kind() => return Ok(None),
+            Err(io) => return Err(io),
+        };
         let mut contents = Vec::new();
         try!(file.read_to_end(&mut contents));
-        Self::parse(&contents)
+        Self::parse(&contents).map(|parsed| {
+            Some(parsed)
+        })
     }
 
-    #[allow(dead_code)]
-    pub fn parse(mut content: &[u8]) -> io::Result<Self> {
+    #[allow(unused)]
+    fn parse(mut content: &[u8]) -> io::Result<Self> {
         let checksum = store::sha1_hash_hex(&content[..content.len() - 20]);
 
         // Parse header
@@ -153,52 +161,6 @@ impl PackIndex {
     }
 
     ///
-    /// Creates an index from a list of objects and their offsets
-    /// into the packfile.
-    ///
-    pub fn from_packfile(pack: &PackFile) -> Self {
-        let mut objects = pack.objects().collect::<Vec<_>>();
-        let size = objects.len();
-        let mut fanout = [0u32; 256];
-        let mut offsets = vec![0; size];
-        let mut shas = vec![[0; 20]; size];
-        let mut checksums: Vec<u32> = vec![0; size];
-
-        // Sort the objects by SHA
-        objects.sort_by(|&(_, ref oa), &(_, ref ob)| {
-            oa.sha().cmp(&ob.sha())
-        });
-
-        for (i, &(offset, ref obj)) in objects.iter().enumerate() {
-            let mut sha = [0; 20];
-            let vsha = &obj.sha().from_hex().unwrap();
-            // TODO: This should be a single copy instead of a loop but
-            // there is currently no stable function for this.
-            for (i, b) in vsha.iter().enumerate() {
-                sha[i] = *b;
-            }
-
-            let checksum = crc32::checksum_ieee(&obj.content);
-            let fanout_start = sha[0] as usize;
-            // By definition of the fanout table we need to increment every entry >= this sha
-            for f in fanout.iter_mut().skip(fanout_start) {
-                *f += 1;
-            }
-            shas[i] = sha;
-            offsets[i] = offset as u32;
-            checksums[i] = checksum;
-        }
-        assert_eq!(size as u32, fanout[255]);
-        PackIndex {
-            fanout: fanout,
-            offsets: offsets,
-            shas: shas,
-            checksums: checksums,
-            pack_sha: pack.sha().to_owned()
-        }
-    }
-
-    ///
     /// Returns the offset in the packfile for the given SHA, if any.
     ///
     #[allow(dead_code)]
@@ -215,7 +177,50 @@ impl PackIndex {
             s[..].cmp(sha)
         }).and_then(|i| Ok(self.offsets[i + start] as usize)).ok()
     }
+
+    ///
+    /// Creates an index from a list of objects and their offsets
+    /// into the packfile.
+    ///
+    pub fn from_objects(iter: Objects, pack_sha: &str) -> Self {
+        let mut objects = iter.collect::<Vec<_>>();
+        let size = objects.len();
+        let mut fanout = [0u32; 256];
+        let mut offsets = vec![0; size];
+        let mut shas = vec![[0; 20]; size];
+        let mut checksums: Vec<u32> = vec![0; size];
+
+        // Sort the objects by SHA
+        objects.sort_by(|&(_, _, ref oa), &(_, _, ref ob)| {
+            oa.sha().cmp(&ob.sha())
+        });
+
+        for (i, &(offset, crc, ref obj)) in objects.iter().enumerate() {
+            let mut sha = [0; 20];
+            let vsha = &obj.sha().from_hex().unwrap();
+            sha.clone_from_slice(&vsha);
+
+            // Checksum should be of packed content in the packfile.
+            let fanout_start = sha[0] as usize;
+            // By definition of the fanout table we need to increment every entry >= this sha
+            for f in fanout.iter_mut().skip(fanout_start) {
+                *f += 1;
+            }
+            shas[i] = sha;
+            offsets[i] = offset as u32;
+            checksums[i] = crc;
+        }
+        assert_eq!(size as u32, fanout[255]);
+        PackIndex {
+            fanout: fanout,
+            offsets: offsets,
+            shas: shas,
+            checksums: checksums,
+            pack_sha: pack_sha.to_owned()
+        }
+    }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -226,11 +231,11 @@ mod tests {
 
     use packfile::PackFile;
 
+    static PACK_FILE: &'static str =
+        "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.pack";
     static IDX_FILE: &'static str =
         "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.idx";
 
-    static PACK_FILE: &'static str =
-        "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.pack";
 
     static COMMIT: &'static str = "fb6fb3d9b81142566f4b2466857b0302617768de";
 
@@ -245,20 +250,26 @@ mod tests {
     #[test]
     fn creating_an_index() {
         // Create an index from the associated packfile
-        let file = File::open(PACK_FILE).unwrap();
-        let pack = PackFile::from_file(file).unwrap();
-        let index = PackIndex::from_packfile(&pack);
+        //
+        // The packfile index when encoded should exactly
+        // match the one which was read when the Packfile::open
+        // call was made.
+        let pack = PackFile::open(PACK_FILE).unwrap();
+        let index = PackIndex::from_objects(pack.objects(), pack.sha());
 
-        // Read the index associated with the packfile
-        let mut bytes = Vec::new();
-        let mut file = File::open(IDX_FILE).unwrap();
-        file.read_to_end(&mut bytes).unwrap();
-        let test_idx = PackIndex::parse(&bytes[..]).unwrap();
-
-        let idx_shas = index.shas.iter().map(|s| s.to_hex()).collect::<Vec<_>>();
-        let test_shas = test_idx.shas.iter().map(|s| s.to_hex()).collect::<Vec<_>>();
+        let test_shas = pack.index.shas
+            .iter()
+            .map(|s| s.to_hex())
+            .collect::<Vec<_>>();
+        let idx_shas = index.shas
+            .iter()
+            .map(|s| s.to_hex())
+            .collect::<Vec<_>>();
         assert_eq!(idx_shas.len(), test_shas.len());
         assert_eq!(idx_shas, test_shas);
+        let test_encoded = pack.index.encode().unwrap();
+        let idx_encoded = index.encode().unwrap();
+        assert_eq!(idx_encoded, test_encoded);
     }
 
     #[test]

@@ -4,28 +4,31 @@ mod index;
 pub use self::index::PackIndex;
 
 use flate2::read::ZlibDecoder;
-use rustc_serialize::hex::ToHex;
-use byteorder::{ReadBytesExt,BigEndian};
+use rustc_serialize::hex::{FromHex,ToHex};
+use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
+use crc::crc32;
 
-use std::fs::File;
-use std::io::{Read,Seek,Cursor,SeekFrom};
+use std::fs::{self, File};
+use std::path::{Path,PathBuf};
+use std::io::{Read,Write,Seek,Cursor,SeekFrom};
 use std::io::Result as IoResult;
 use std::collections::HashMap;
 
 use store;
 use store::{GitObject, GitObjectType};
-use delta;
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
+static HEADER_LENGTH: usize = 12; // Magic + Len + Version
 
 // The fields version and num_objects are currently unused
 #[allow(dead_code)]
 pub struct PackFile {
     version: u32,
     num_objects: usize,
-    objects: HashMap<String, GitObject>,
     encoded_objects: Vec<u8>,
     sha: String,
+    // TODO: Fix this since this is only used in a verification test.
+    pub index: PackIndex,
 }
 
 ///
@@ -37,15 +40,49 @@ pub enum PackObject {
     RefDelta([u8; 20], Vec<u8>),
 }
 
-impl PackFile {
-    #[allow(unused)]
-    pub fn from_file(mut file: File) -> IoResult<Self> {
-        let mut contents = Vec::new();
-        try!(file.read_to_end(&mut contents));
-        PackFile::parse(&contents)
+impl PackObject {
+    pub fn is_base(&self) -> bool {
+        if let PackObject::Base(_) = *self {
+            true
+        } else {
+            false
+        }
     }
 
-    pub fn parse(mut contents: &[u8]) -> IoResult<Self> {
+    pub fn unwrap(self) -> GitObject {
+        match self {
+            PackObject::Base(b) => b,
+            _ => panic!("Called `GitObject::unwrap` on a deltified object")
+        }
+    }
+
+    pub fn patch(&self, delta: &[u8]) -> Option<Self> {
+        if let PackObject::Base(ref b) = *self {
+            Some(PackObject::Base(b.patch(delta)))
+        } else {
+            None
+        }
+    }
+}
+
+impl PackFile {
+    pub fn open<P: AsRef<Path>>(p: P) -> IoResult<Self> {
+        let path = p.as_ref();
+        let mut contents = Vec::new();
+        let mut file = try!(File::open(path));
+        try!(file.read_to_end(&mut contents));
+
+        let idx_path = path.with_extension("idx");
+        let idx = try!(PackIndex::open(idx_path));
+
+        PackFile::parse_with_index(&contents, idx)
+    }
+
+    pub fn parse(contents: &[u8]) -> IoResult<Self> {
+        PackFile::parse_with_index(contents, None)
+    }
+
+    fn parse_with_index(mut contents: &[u8], idx: Option<PackIndex>) -> IoResult<Self> {
         let sha_computed = store::sha1_hash_hex(&contents[..contents.len() - 20]);
 
         let magic = try!(contents.read_u32::<BigEndian>());
@@ -53,32 +90,45 @@ impl PackFile {
         let num_objects = try!(contents.read_u32::<BigEndian>()) as usize;
 
         if magic == MAGIC_HEADER {
-            let objects = Objects::new(contents, num_objects)
-                .map(|(_, o)| (o.sha(), o))
-                .collect::<HashMap<_, _>>();
-            // Get the last 20 bytes to read the sha
             let contents_len = contents.len();
+            let checksum = &contents[(contents_len - 20)..contents_len].to_hex();
+            assert_eq!(checksum, &sha_computed);
 
-            let sha = &contents[(contents_len - 20)..contents_len].to_hex();
-            assert_eq!(sha, &sha_computed);
+            // Use slice::split_at
+            contents = &contents[..contents_len - 20];
+            let objects = Objects::new(&contents, num_objects);
+            let index = idx.unwrap_or_else(|| PackIndex::from_objects(objects, &sha_computed));
 
             Ok(PackFile {
                 version: version,
                 num_objects: num_objects,
-                objects: objects,
                 encoded_objects: contents.to_vec(),
-                sha: sha_computed
+                sha: sha_computed,
+                index: index
             })
         } else {
           unreachable!("Packfile failed to parse");
         }
     }
 
-    #[allow(dead_code)]
-    pub fn unpack_all(&self, repo: &str) -> IoResult<()> {
-        for (_, object) in self.objects() {
-            try!(object.write(repo))
-        }
+    pub fn write(&self, root: &PathBuf) -> IoResult<()> {
+        let mut path = root.clone();
+        path.push(format!("objects/pack"));
+        try!(fs::create_dir_all(&path));
+        path.push(format!("pack-{}", self.sha()));
+        path.set_extension("pack");
+
+        let mut idx_path = path.clone();
+        idx_path.set_extension("idx");
+
+        let mut pack_file = try!(File::create(&path));
+        let mut idx_file = try!(File::create(&idx_path));
+
+        let pack = try!(self.encode());
+        try!(pack_file.write_all(&pack));
+
+        let idx = try!(self.index.encode());
+        try!(idx_file.write_all(&idx));
         Ok(())
     }
 
@@ -86,34 +136,100 @@ impl PackFile {
     /// Returns an iterator over the objects within this packfile, along
     /// with their offsets.
     ///
+    #[allow(unused)]
     pub fn objects(&self) -> Objects {
         Objects::new(&self.encoded_objects, self.num_objects)
     }
 
-    pub fn find_by_sha(&self, sha: &str) -> Option<GitObject> {
-        self.objects.get(sha).cloned()
+    pub fn encode(&self) -> IoResult<Vec<u8>> {
+        let mut encoded = Vec::with_capacity(HEADER_LENGTH + self.encoded_objects.len());
+        try!(encoded.write_u32::<BigEndian>(MAGIC_HEADER));
+        try!(encoded.write_u32::<BigEndian>(self.version));
+        try!(encoded.write_u32::<BigEndian>(self.num_objects as u32));
+        try!(encoded.write_all(&self.encoded_objects));
+        let checksum = store::sha1_hash(&encoded);
+        try!(encoded.write_all(&checksum));
+        Ok(encoded)
     }
 
     pub fn sha(&self) -> &str {
         &self.sha
     }
 
-    pub fn find_by_offset(&self, offset: usize) -> Option<GitObject> {
-        //let mut cursor = Cursor::new(&self.encoded_objects[..]);
-        //cursor.seek(SeekFrom::Start(offset as u64)).ok().unwrap();
-        //read_object(&mut cursor).ok().and_then(|pack_obj| {
-        //    match pack_obj {
-        //        PackObject::Base(base) => base,
-        //        PackObject::OfsDelta(offset, patch) => {
-        //        }
-        //        PackObject::RefDelta(sha, patch) => {
-        //            self.find_by_sha(&sha).and_then(|base| {
-        //                GitObject::new(
-        //            })
-        //        }
-        //    }
-        //})
-        None
+    pub fn find_by_sha(&self, sha: &str) -> IoResult<Option<GitObject>> {
+        let off = sha.from_hex().ok().and_then(|s| self.index.find(&s));
+        match off {
+            Some(offset) => self.find_by_offset(offset),
+            None => Ok(None)
+        }
+    }
+
+    fn find_by_sha_unresolved(&self, sha: &str) -> IoResult<Option<PackObject>> {
+        let off = sha.from_hex().ok().and_then(|s| self.index.find(&s));
+        match off {
+            Some(offset) => Ok(Some(try!(self.read_at_offset(offset)))),
+            None => Ok(None)
+        }
+    }
+
+    fn find_by_offset(&self, mut offset: usize) -> IoResult<Option<GitObject>> {
+        // Read the initial offset.
+        //
+        // If it is a base object, return the enclosing object.
+        let mut object = try!(self.read_at_offset(offset));
+        if let PackObject::Base(base) = object {
+            return Ok(Some(base));
+        };
+        // Otherwise we will have to recreate the delta object.
+        //
+        // To do this, we accumulate the entire delta chain into a vector by repeatedly
+        // following the references to the next base object.
+        //
+        // We need to keep track of all the offsets so they are correct.
+        let mut patches = Vec::new();
+
+        while !object.is_base() {
+            let next;
+            match object {
+                PackObject::OfsDelta(delta_offset, patch) => {
+                    patches.push(patch);
+                    // This offset is *relative* to its own position
+                    // We don't need to store multiple chains because a delta chain
+                    // will either be offsets or shas but not both.
+                    offset -= delta_offset;
+                    next = Some(try!(self.read_at_offset(offset)));
+                },
+                PackObject::RefDelta(sha, patch) => {
+                    patches.push(patch);
+                    next = try!(self.find_by_sha_unresolved(&sha.to_hex()));
+                },
+                _ => unreachable!()
+            }
+            if next.is_some() {
+                object = next.unwrap()
+            } else {
+                // This should be an error that the object is incomplete
+                return Ok(None)
+            }
+        }
+        // The patches then look like: vec![patch3, patch2, patch1]
+        //
+        // These patches are then popped off the end, applied in turn to create the desired object.
+        // We could cache these results along the way in some offset cache to avoid repeatedly
+        // recreating the chain for any object along it, but this shouldn't be necessary
+        // for most operations since we will only be concerned with the tip of the chain.
+        for patch in patches.pop() {
+            object = object.patch(&patch).unwrap();
+            // TODO: Cache here
+        }
+        Ok(Some(object.unwrap()))
+    }
+
+    fn read_at_offset(&self, offset: usize) -> IoResult<PackObject> {
+        let total_offset = offset - HEADER_LENGTH;
+        let mut cursor = Cursor::new(&self.encoded_objects[..]);
+        cursor.seek(SeekFrom::Start(total_offset as u64)).ok().unwrap();
+        read_object(&mut cursor)
     }
 }
 
@@ -126,8 +242,8 @@ pub struct Objects<'a> {
     remaining: usize,
     base_objects: HashMap<String, GitObject>,
     base_offsets: HashMap<usize, String>,
-    ref_deltas: Vec<(usize, PackObject)>,
-    ofs_deltas: Vec<(usize, PackObject)>,
+    ref_deltas: Vec<(usize, u32, PackObject)>,
+    ofs_deltas: Vec<(usize, u32, PackObject)>,
     resolve: bool,
 }
 
@@ -148,70 +264,73 @@ impl<'a> Objects<'a> {
         read_object(&mut self.cursor).unwrap()
     }
 
-    fn resolve_ref_delta(&mut self) -> Option<(usize, GitObject)> {
+    fn resolve_ref_delta(&mut self) -> Option<(usize, u32, GitObject)> {
         match self.ref_deltas.pop() {
-            Some((offset, PackObject::RefDelta(base, patch))) => {
+            Some((offset, checksum, PackObject::RefDelta(base, patch))) => {
                 let patched = {
                     let sha = base.to_hex();
                     let base_object = self.base_objects.get(&sha).unwrap();
-                    let source = &base_object.content[..];
-                    GitObject::new(
-                        base_object.obj_type,
-                        delta::patch(source, &patch)
-                    )
+                    base_object.patch(&patch)
                 };
                 {
                     let sha = patched.sha();
                     self.base_offsets.insert(offset, sha.clone());
                     self.base_objects.insert(sha, patched.clone());
                 }
-                Some((offset, patched))
+                Some((offset, checksum, patched))
             },
-            Some((_, _)) => unreachable!(),
+            Some(_) => unreachable!(),
             None => None
         }
     }
 
-    fn resolve_ofs_delta(&mut self) -> Option<(usize, GitObject)> {
+    fn resolve_ofs_delta(&mut self) -> Option<(usize, u32, GitObject)> {
         match self.ofs_deltas.pop() {
-            Some((offset, PackObject::OfsDelta(base, patch))) => {
+            Some((offset, checksum, PackObject::OfsDelta(base, patch))) => {
                 let patched = {
                     let base = offset - base;
                     let base_sha = self.base_offsets.get(&base).unwrap();
                     let base_object = self.base_objects.get(base_sha).unwrap();
-                    let source = &base_object.content[..];
-                    GitObject::new(base_object.obj_type, delta::patch(source, &patch))
+                    base_object.patch(&patch)
                 };
                 let sha = patched.sha();
                 self.base_objects.insert(sha, patched.clone());
-                Some((offset, patched))
+                Some((offset, checksum, patched))
             },
-            Some((_, _)) => unreachable!(),
+            Some(_) => unreachable!(),
             None => None
         }
     }
 }
 
 impl<'a> Iterator for Objects<'a> {
-    type Item = (usize, GitObject);
+    // (offset, crc32, Object)
+    type Item = (usize, u32, GitObject);
 
     fn next(&mut self) -> Option<Self::Item> {
         // First yield all the base objects
         while self.remaining > 0 {
             self.remaining -= 1;
-            let offset = self.cursor.position() as usize + 12;
+            let offset = self.cursor.position() as usize + HEADER_LENGTH;
             let object = self.read_object();
+            let checksum = {
+                let contents = self.cursor.get_ref();
+                let end = self.cursor.position() as usize;
+
+                let compressed_object = &contents[offset - HEADER_LENGTH..end];
+                crc32::checksum_ieee(&compressed_object)
+            };
 
             match object {
-                PackObject::OfsDelta(_, _) => self.ofs_deltas.push((offset, object)),
-                PackObject::RefDelta(_, _) => self.ref_deltas.push((offset, object)),
+                PackObject::OfsDelta(_, _) => self.ofs_deltas.push((offset, checksum, object)),
+                PackObject::RefDelta(_, _) => self.ref_deltas.push((offset, checksum, object)),
                 PackObject::Base(base) => {
                     {
                         let sha = base.sha();
                         self.base_offsets.insert(offset, sha.clone());
                         self.base_objects.insert(sha, base.clone());
                     }
-                    return Some((offset, base))
+                    return Some((offset, checksum, base))
                 },
             }
         }
@@ -319,15 +438,38 @@ fn read_msb_bytes<R: Read>(r: &mut R) -> IoResult<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+    use std::fs::File;
 
-    static IDX_FILE: &'static [u8] =
-        include_bytes!(
-            "../../tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.pack"
-        );
+    static PACK_FILE: &'static str = "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.pack";
+
+    fn read_pack() -> PackFile {
+        PackFile::open(PACK_FILE).unwrap()
+    }
 
     #[test]
     fn reading_a_packfile() {
-        PackFile::parse(IDX_FILE).unwrap();
+        read_pack();
+    }
+
+    #[test]
+    fn read_and_encode_should_be_inverses() {
+        let pack = read_pack();
+        let encoded = pack.encode().unwrap();
+        let mut on_disk = Vec::with_capacity(encoded.len());
+        let mut file = File::open(PACK_FILE).unwrap();
+        file.read_to_end(&mut on_disk).unwrap();
+
+        assert_eq!(on_disk, encoded);
+    }
+
+    #[test]
+    fn reading_a_packed_object_by_offset() {
+        let pack = read_pack();
+        // Read a base object
+        pack.find_by_offset(1094).unwrap().unwrap();
+        // Read a deltified object
+        pack.find_by_offset(1238).unwrap().unwrap();
     }
 }
 

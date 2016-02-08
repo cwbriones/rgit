@@ -18,7 +18,7 @@ pub struct Commit<'a> {
     pub tree: &'a str,
     pub parents: Vec<&'a str>,
     author: Person<'a>,
-    committer: Person<'a>,
+    _committer: Person<'a>,
     message: &'a str,
     raw: &'a GitObject
 }
@@ -31,7 +31,7 @@ impl<'a> Commit<'a> {
                 tree: tree,
                 parents: parents,
                 author: author,
-                committer: committer,
+                _committer: committer,
                 message: message,
                 raw: obj
             })
@@ -141,19 +141,11 @@ mod tests {
 
     #[test]
     fn test_person_parsing() {
-        let input = b"Some Person <person@people.com> 12345 -6789\n";
+        let input = b"The Author <author@devs.com> 1353116070 +1100\n";
 
-        match parse_person(&input[..]) {
-            IResult::Done(_, person) => {
-                assert_eq!(person.name, "Some Person");
-                assert_eq!(person.email, "person@people.com");
-                //assert_eq!(person.timestamp, (12345, -6789));
-            },
-            IResult::Error(e) => {
-                println!("Error {:?}", e);
-                panic!("Failed to parse person.");
-            },
-            _ => panic!("yo")
+        if let IResult::Done(_, person) = parse_person(&input[..]) {
+            assert_eq!(person.name, "The Author");
+            assert_eq!(person.email, "author@devs.com");
         }
     }
 

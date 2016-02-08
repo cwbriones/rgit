@@ -17,7 +17,7 @@ use byteorder::{BigEndian, WriteBytesExt};
 
 use rustc_serialize::hex::FromHex;
 
-use packfile::{PackFile, PackIndex};
+use packfile::PackFile;
 
 use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
@@ -27,7 +27,6 @@ use std::env;
 pub struct Repo {
     dir: String,
     pack: Option<PackFile>,
-    _index: Option<PackIndex>,
 }
 
 impl Repo {
@@ -64,52 +63,25 @@ impl Repo {
         };
 
         let pack = pack_path.map(|p| {
-            let mut buf = Vec::new();
-            let mut file = File::open(p).unwrap();
-            file.read_to_end(&mut buf).unwrap();
-            PackFile::parse(&buf).unwrap()
-        });
-        let index = pack.as_ref().map(|p| {
-            PackIndex::from_packfile(p)
+            PackFile::open(p).unwrap()
         });
 
         Ok(Repo {
             dir: dir.to_str().unwrap().to_owned(),
             pack: pack,
-            _index: index
         })
     }
 
     pub fn from_packfile(dir: &str, packfile_data: &[u8]) -> IoResult<Self> {
         let packfile = try!(PackFile::parse(&packfile_data[..]));
-
-        let mut p = PathBuf::new();
-        p.push(dir);
-        p.push(".git");
-        p.push("objects");
-        p.push("pack");
-        try!(fs::create_dir_all(&p));
-        p.push(format!("pack-{}", packfile.sha()));
-
-        let mut pack_path = p.clone();
-        pack_path.set_extension("pack");
-
-        let mut idx_path = p.clone();
-        idx_path.set_extension("idx");
-
-        let mut file = try!(File::create(&pack_path));
-        let mut idx_file = try!(File::create(&idx_path));
-
-        let index = PackIndex::from_packfile(&packfile);
-        let encoded_idx = try!(index.encode());
-
-        try!(file.write_all(&packfile_data[..]));
-        try!(idx_file.write_all(&encoded_idx[..]));
+        let mut root = PathBuf::new();
+        root.push(dir);
+        root.push(".git");
+        try!(packfile.write(&root));
 
         Ok(Repo {
             dir: dir.to_owned(),
             pack: Some(packfile),
-            _index: Some(index)
         })
     }
 
@@ -197,12 +169,12 @@ impl Repo {
     }
 
     pub fn read_object(&self, sha: &str) -> IoResult<GitObject> {
-        let obj = self.pack.as_ref().and_then(|pack| {
-            pack.find_by_sha(sha)
-        }).or_else(|| {
-            Some(GitObject::open(&self.dir, sha).unwrap())
-        });
-        Ok(obj.unwrap())
+        // Attempt to read from disk first
+        GitObject::open(&self.dir, sha).or_else(|_| {
+            // If this isn't there, read from the packfile
+            let pack = self.pack.as_ref().unwrap();
+            pack.find_by_sha(sha).map(|o| o.unwrap())
+        })
     }
 
     pub fn log(&self, rev: &str) -> IoResult<()> {
