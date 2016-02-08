@@ -17,7 +17,7 @@ use store::tree::Tree;
 ///
 /// A type of loose object found in the database.
 ///
-#[derive(Copy,Clone)]
+#[derive(Debug,Copy,Clone)]
 pub enum ObjectType {
     Tree,
     Commit,
@@ -82,7 +82,7 @@ impl Object {
         Ok(Object {
             obj_type: obj_type,
             content: footer,
-            sha: RefCell::new(None)
+            sha: RefCell::new(Some(sha1.to_owned()))
         })
     }
 

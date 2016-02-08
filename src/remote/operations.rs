@@ -65,6 +65,13 @@ pub fn clone_ssh_priv(host: &str, user: &str, repo: &str) -> IoResult<()> {
     Ok(())
 }
 
+pub fn log(revision: Option<&str>) -> IoResult<()> {
+    let repo = try!(Repo::from_enclosing());
+    let rev = revision.unwrap_or("HEAD");
+    try!(repo.log(&rev));
+    Ok(())
+}
+
 ///
 /// Lists remote refs available in the given repo.
 ///

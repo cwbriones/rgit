@@ -18,6 +18,7 @@ clap = "1.5.5"
 ssh2 = "0.2"
 crc = "1.2.0"
 clippy = "*"
+chrono = "0.2.19"
 
 [[bin]]
 name = "rgit"

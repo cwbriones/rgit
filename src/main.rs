@@ -7,6 +7,7 @@ extern crate hyper;
 extern crate clap;
 extern crate ssh2;
 extern crate crc;
+extern crate chrono;
 
 #[macro_use]
 extern crate nom;
@@ -32,6 +33,10 @@ fn main() {
                 .required(true)
             )
             .arg(Arg::with_name("dir"))
+        )
+        .subcommand(SubCommand::with_name("log")
+            .about("Show commit logs")
+            .arg(Arg::with_name("revision"))
         )
         .subcommand(SubCommand::with_name("clone-ssh")
             .about("Clone a remote repository using ssh")
@@ -93,6 +98,11 @@ fn main() {
             let repo = matches.value_of("repo").unwrap();
             remote_ops::ls_remote(repo)
         },
+        Some(s @ "log") => {
+            let matches = app_matches.subcommand_matches(s).unwrap();
+            let revision = matches.value_of("revision");
+            remote_ops::log(revision)
+        }
         Some(s @ "ls-remote-ssh") => {
             let matches = app_matches.subcommand_matches(s).unwrap();
             let host = matches.value_of("host").unwrap();

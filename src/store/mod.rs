@@ -22,14 +22,65 @@ use packfile::{PackFile, PackIndex};
 use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
 
-pub struct Repo<'a> {
-    dir: &'a str,
-    pack: PackFile,
+use std::env;
+
+pub struct Repo {
+    dir: String,
+    pack: Option<PackFile>,
     _index: Option<PackIndex>,
 }
 
-impl<'a> Repo<'a> {
-    pub fn from_packfile(dir: &'a str, packfile_data: &[u8]) -> IoResult<Self> {
+impl Repo {
+    ///
+    /// Recursively searches for and loads a repository from the enclosing
+    /// directories.
+    ///
+    pub fn from_enclosing() -> IoResult<Self> {
+        // Navigate upwards until we are in the repo
+        let mut dir = try!(env::current_dir());
+        while !is_git_repo(&dir) {
+            assert!(dir.pop(), "Not in a git repo");
+        }
+
+        let mut p = dir.clone();
+        p.push(".git");
+        p.push("objects");
+        p.push("pack");
+
+        let pack_path = if p.exists() {
+            let mut the_path = String::new();
+            for dir_entry in try!(fs::read_dir(p)) {
+                let d = dir_entry.unwrap();
+                let fname = d.file_name();
+                let s = fname.to_str().unwrap();
+                if s.starts_with("pack") && s.ends_with(".pack") {
+                    the_path = s.to_owned();
+                    break;
+                }
+            }
+            Some(the_path)
+        } else {
+            None
+        };
+
+        let pack = pack_path.map(|p| {
+            let mut buf = Vec::new();
+            let mut file = File::open(p).unwrap();
+            file.read_to_end(&mut buf).unwrap();
+            PackFile::parse(&buf).unwrap()
+        });
+        let index = pack.as_ref().map(|p| {
+            PackIndex::from_packfile(p)
+        });
+
+        Ok(Repo {
+            dir: dir.to_str().unwrap().to_owned(),
+            pack: pack,
+            _index: index
+        })
+    }
+
+    pub fn from_packfile(dir: &str, packfile_data: &[u8]) -> IoResult<Self> {
         let packfile = try!(PackFile::parse(&packfile_data[..]));
 
         let mut p = PathBuf::new();
@@ -56,8 +107,8 @@ impl<'a> Repo<'a> {
         try!(idx_file.write_all(&encoded_idx[..]));
 
         Ok(Repo {
-            dir: dir,
-            pack: packfile,
+            dir: dir.to_owned(),
+            pack: Some(packfile),
             _index: Some(index)
         })
     }
@@ -67,11 +118,11 @@ impl<'a> Repo<'a> {
     /// of the repository.
     ///
     pub fn checkout_head(&self) -> IoResult<()> {
-        let tip = try!(read_sym_ref(self.dir, "HEAD"));
+        let tip = try!(resolve_ref(&self.dir, "HEAD"));
         let mut idx = Vec::new();
         // FIXME: This should also "bubble up" errors, walk needs to return a result.
-        self.walk(&tip).and_then(|t| self.walk_tree(self.dir, &t, &mut idx).ok());
-        try!(write_index(self.dir, &mut idx[..]));
+        self.walk(&tip).and_then(|t| self.walk_tree(&self.dir, &t, &mut idx).ok());
+        try!(write_index(&self.dir, &mut idx[..]));
         Ok(())
     }
 
@@ -145,39 +196,89 @@ impl<'a> Repo<'a> {
     }
 
     pub fn read_object(&self, sha: &str) -> IoResult<GitObject> {
-        Ok(self.pack.find_by_sha(sha).unwrap())
+        let obj = self.pack.as_ref().and_then(|pack| {
+            pack.find_by_sha(sha)
+        }).or_else(|| {
+            Some(GitObject::open(&self.dir, sha).unwrap())
+        });
+        Ok(obj.unwrap())
+    }
+
+    pub fn log(&self, rev: &str) -> IoResult<()> {
+        let mut sha = try!(resolve_ref(&self.dir, rev));
+        loop {
+            let object = try!(self.read_object(&sha));
+            let commit = object.as_commit().expect("Tried to log an object that wasn't a commit");
+            println!("{}", commit);
+            if commit.parents.len() > 0 {
+                sha = commit.parents[0].to_owned();
+            } else {
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_git_repo<P: AsRef<Path>>(p: &P) -> bool {
+    let path = p.as_ref().clone().join(".git");
+    path.exists()
+}
+
+///
+/// Reads the given ref to a valid SHA.
+///
+fn resolve_ref(repo: &str, name: &str) -> IoResult<String> {
+    // Check if the name is already a sha.
+    let trimmed = name.trim();
+    if is_sha(trimmed) {
+        return Ok(trimmed.to_owned())
+    } else {
+        read_sym_ref(repo, trimmed)
     }
 }
 
 ///
-/// Reads the symbolic ref and resolve it to the actual SHA it points to, if any.
+/// Returns true if id is a valid SHA-1 hash.
 ///
-pub fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
+fn is_sha(id: &str) -> bool {
+    id.len() == 40 && id.chars().all(|c| c.is_digit(16))
+}
+
+
+///
+/// Reads the symbolic ref and resolve it to the actual ref it represents.
+///
+fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
     // Read the symbolic ref directly and parse the actual ref out
-    let mut root = PathBuf::new();
-    root.push(repo);
-    root.push(".git");
+    let mut path = PathBuf::new();
+    path.push(repo);
+    path.push(".git");
 
-    let mut sym_path = root.clone();
-    sym_path.push(name);
+    if name != "HEAD" {
+        if !name.contains("/") {
+            path.push("refs/heads");
+        } else if !name.starts_with("refs/") {
+            path.push("refs/remotes");
+        }
+    }
+    path.push(name);
 
+    // Read the actual ref out
     let mut contents = String::new();
-    let mut file = try!(File::open(sym_path));
+    let mut file = try!(File::open(path));
     try!(file.read_to_string(&mut contents));
-    let the_ref = contents.split("ref: ")
-        .skip(1)
-        .next()
-        .unwrap()
-        .trim();
 
-    // Read the SHA out of the actual ref
-    let mut ref_path = root.clone();
-    ref_path.push(the_ref);
-
-    let mut ref_file = try!(File::open(ref_path));
-    let mut sha = String::new();
-    try!(ref_file.read_to_string(&mut sha));
-    Ok(sha.trim().to_owned())
+    if contents.starts_with("ref: ") {
+        let the_ref = contents.split("ref: ")
+            .skip(1)
+            .next()
+            .unwrap()
+            .trim();
+        resolve_ref(repo, &the_ref)
+    } else {
+        Ok(contents.trim().to_owned())
+    }
 }
 
 #[derive(Debug)]
