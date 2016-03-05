@@ -173,6 +173,7 @@ impl Repo {
                     try!(fs::set_permissions(&full_path, perms));
 
                     let idx_entry = try!(get_index_entry(
+                        &self.dir,
                         full_path.to_str().unwrap(),
                         mode.clone(),
                         sha.clone()));
@@ -296,28 +297,27 @@ struct IndexEntry {
     path: String
 }
 
-fn get_index_entry(path: &str, file_mode: EntryMode, sha: String) -> IoResult<IndexEntry> {
+fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: String) -> IoResult<IndexEntry> {
     let file = try!(File::open(path));
     let meta = try!(file.metadata());
 
     // We need to remove the repo path from the path we save on the index entry
-    let iter = Path::new(path)
-        .components()
-        .skip(1)
-        .map(|c| c.as_os_str());
-    let relative_path =  PathBuf::from_iter(iter);
+    let relative_path = PathBuf::from(
+            path.trim_left_matches(root)
+                .trim_left_matches('/')
+        );
     // FIXME: This error is not handled.
     let decoded_sha = sha.from_hex().unwrap();
 
     Ok(IndexEntry {
         ctime: meta.ctime(),
         mtime: meta.mtime(),
-        device: meta.dev(),
+        device: meta.dev() as i32,
         inode: meta.ino(),
-        mode: meta.mode(),
+        mode: meta.mode() as u16,
         uid: meta.uid(),
         gid: meta.gid(),
-        size: meta.size(),
+        size: meta.size() as i64,
         sha: decoded_sha,
         file_mode: file_mode,
         path: relative_path.to_str().unwrap().to_owned()
