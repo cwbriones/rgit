@@ -441,7 +441,15 @@ mod tests {
     use std::io::Read;
     use std::fs::File;
 
-    static PACK_FILE: &'static str = "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.pack";
+    static PACK_FILE: &'static str =
+        "tests/data/packs/pack-79f006bb5e8d079fdbe07e7ce41f97f4db7d341c.pack";
+
+    static BASE_OFFSET: usize = 2154;
+    static BASE_SHA: &'static str = "7e690abcc93718dbf26ddea5c6ede644a63a5b34";
+    // We need to test reading an object with a non-trivial delta
+    // chain (4).
+    static DELTA_SHA: &'static str = "9b104dc31028e46f2f7d0b8a29989ab9a5155d41";
+    static DELTA_OFFSET: usize = 2461;
 
     fn read_pack() -> PackFile {
         PackFile::open(PACK_FILE).unwrap()
@@ -467,9 +475,26 @@ mod tests {
     fn reading_a_packed_object_by_offset() {
         let pack = read_pack();
         // Read a base object
-        pack.find_by_offset(1094).unwrap().unwrap();
+        pack.find_by_offset(BASE_OFFSET)
+            .unwrap()
+            .unwrap();
         // Read a deltified object
-        pack.find_by_offset(1238).unwrap().unwrap();
+        pack.find_by_offset(DELTA_OFFSET)
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
+    fn reading_a_packed_object_by_sha() {
+        let pack = read_pack();
+        // Read a base object
+        pack.find_by_sha(BASE_SHA)
+            .unwrap()
+            .unwrap();
+        // Read a deltified object
+        pack.find_by_sha(DELTA_SHA)
+            .unwrap()
+            .unwrap();
     }
 }
 
