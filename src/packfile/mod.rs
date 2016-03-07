@@ -218,7 +218,7 @@ impl PackFile {
         // We could cache these results along the way in some offset cache to avoid repeatedly
         // recreating the chain for any object along it, but this shouldn't be necessary
         // for most operations since we will only be concerned with the tip of the chain.
-        for patch in patches.pop() {
+        while let Some(patch) = patches.pop() {
             object = object.patch(&patch).unwrap();
             // TODO: Cache here
         }
@@ -450,6 +450,11 @@ mod tests {
     // chain (4).
     static DELTA_SHA: &'static str = "9b104dc31028e46f2f7d0b8a29989ab9a5155d41";
     static DELTA_OFFSET: usize = 2461;
+    static DELTA_CONTENT: &'static str =
+        "This is a test repo, used for testing the capabilities of the rgit tool. \
+        rgit is a implementation of\n\
+        the Git version control tool written in Rust.\n\n\
+        This line was added on test branch.\n";
 
     fn read_pack() -> PackFile {
         PackFile::open(PACK_FILE).unwrap()
@@ -495,6 +500,17 @@ mod tests {
         pack.find_by_sha(DELTA_SHA)
             .unwrap()
             .unwrap();
+    }
+
+    #[test]
+    fn reading_delta_objects_should_resolve_them_correctly() {
+        use std::str;
+        let pack = read_pack();
+        let delta = pack.find_by_sha(DELTA_SHA)
+            .unwrap()
+            .unwrap();
+        let content = str::from_utf8(&delta.content[..]).unwrap();
+        assert_eq!(content, DELTA_CONTENT);
     }
 }
 
