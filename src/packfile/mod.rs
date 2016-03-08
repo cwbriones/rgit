@@ -113,7 +113,7 @@ impl PackFile {
 
     pub fn write(&self, root: &PathBuf) -> IoResult<()> {
         let mut path = root.clone();
-        path.push(format!("objects/pack"));
+        path.push("objects/pack");
         try!(fs::create_dir_all(&path));
         path.push(format!("pack-{}", self.sha()));
         path.set_extension("pack");

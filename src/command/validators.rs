@@ -8,7 +8,7 @@ pub fn is_url(val: String) -> Result<(), String> {
 }
 
 pub fn is_ssh_repo(val: String) -> Result<(), String> {
-    let re = Regex::new(r"^(ssh:\/\/\w+@\w+\/|\w+@\w+:)\w+(\/\w+)*(.git)?$").unwrap();
+    let re = Regex::new(r"^(ssh://\w+@\w+/|\w+@\w+:)\w+(/\w+)*(.git)?$").unwrap();
     if re.is_match(&val) {
         Ok(())
     } else {

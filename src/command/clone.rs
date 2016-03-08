@@ -41,7 +41,7 @@ pub fn execute(params: Params) -> IoResult<()> {
             let dir = params.dir.unwrap_or_else(|| {
                 url.path().unwrap()
                     .last().unwrap()
-                    .split(".")
+                    .split('.')
                     .next().unwrap()
                     .to_owned()
             });

@@ -43,7 +43,7 @@ pub fn parse<'a>(matches: &'a ArgMatches) -> Params<'a> {
 
 
 pub fn execute(params: Params) -> IoResult<()> {
-    let dir = params.repo.split(".")
+    let dir = params.repo.split('.')
         .next().unwrap();
     let full_repo = [params.user, "/", params.repo].join("");
     let mut client = GitSSHClient::new(params.host, &full_repo);

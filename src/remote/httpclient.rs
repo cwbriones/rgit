@@ -85,10 +85,10 @@ fn follow_url(mut url: Url) -> Url {
             },
             _ => {
                 let followed_url = url.serialize();
-                let qualified_url = if !followed_url.ends_with(".git") {
-                    [followed_url + ".git"].join("")
-                } else {
+                let qualified_url = if followed_url.ends_with(".git") {
                     followed_url
+                } else {
+                    [followed_url + ".git"].join("")
                 };
                 return Url::parse(&qualified_url).unwrap()
             }

@@ -54,7 +54,7 @@ impl<'a> Display for Commit<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         try!(writeln!(f, "commit {}", self.raw.sha()));
         try!(write!(f, "{}", self.author));
-        for line in self.message.split("\n") {
+        for line in self.message.split('\n') {
             try!(write!(f, "\n    {}", line));
         }
         Ok(())

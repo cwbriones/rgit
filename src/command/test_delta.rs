@@ -28,6 +28,6 @@ pub fn parse<'a>(matches: &'a ArgMatches) -> Params<'a> {
     }
 }
 
-pub fn execute<'a>(params: Params<'a>) -> IoResult<()> {
+pub fn execute(params: Params) -> IoResult<()> {
     delta::patch_file(params.source, params.delta)
 }

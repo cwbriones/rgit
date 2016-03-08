@@ -45,7 +45,7 @@ pub fn execute(params: Params) -> IoResult<()> {
     let full_repo = [params.user, "/", params.repo].join("");
     let mut client = GitSSHClient::new(params.host, &full_repo);
     client.discover_refs().map(|pktlines| {
-        for p in pktlines.iter() {
+        for p in &pktlines {
             let &GitRef{ref id, ref name} = p;
             print!("{}\t{}\n", id, name);
         }

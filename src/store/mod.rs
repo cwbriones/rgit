@@ -183,18 +183,17 @@ impl Repo {
             let object = try!(self.read_object(&sha));
             let commit = object.as_commit().expect("Tried to log an object that wasn't a commit");
             println!("{}", commit);
-            if commit.parents.len() > 0 {
-                sha = commit.parents[0].to_owned();
-            } else {
+            if commit.parents.is_empty() {
                 break;
             }
+            sha = commit.parents[0].to_owned();
         }
         Ok(())
     }
 }
 
 fn is_git_repo<P: AsRef<Path>>(p: &P) -> bool {
-    let path = p.as_ref().clone().join(".git");
+    let path = p.as_ref().join(".git");
     path.exists()
 }
 
@@ -205,7 +204,7 @@ fn resolve_ref(repo: &str, name: &str) -> IoResult<String> {
     // Check if the name is already a sha.
     let trimmed = name.trim();
     if is_sha(trimmed) {
-        return Ok(trimmed.to_owned())
+        Ok(trimmed.to_owned())
     } else {
         read_sym_ref(repo, trimmed)
     }
@@ -229,7 +228,7 @@ fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
     path.push(".git");
 
     if name != "HEAD" {
-        if !name.contains("/") {
+        if !name.contains('/') {
             path.push("refs/heads");
         } else if !name.starts_with("refs/") {
             path.push("refs/remotes");
@@ -340,10 +339,9 @@ fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
     , ..} = entry;
     let flags = (path.len() & 0xFFF) as u16;
     let (encoded_type, perms) = match *file_mode {
-        EntryMode::Normal => (8u32, mode as u32),
+        EntryMode::Normal | EntryMode::Executable => (8u32, mode as u32),
         EntryMode::Symlink => (10u32, 0u32),
         EntryMode::Gitlink => (14u32, 0u32),
-        EntryMode::Executable => (8u32, mode as u32),
         _ => unreachable!("Tried to create an index entry for a non-indexable object")
     };
     let encoded_mode = (encoded_type << 12) | perms;
@@ -375,7 +373,7 @@ fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
     try!(buf.write_u32::<BigEndian>(uid as u32));
     try!(buf.write_u32::<BigEndian>(gid as u32));
     try!(buf.write_u32::<BigEndian>(size as u32));
-    buf.extend(sha.iter());
+    buf.extend_from_slice(&sha);
     try!(buf.write_u16::<BigEndian>(flags));
     buf.extend(path_and_padding);
     Ok(buf)
