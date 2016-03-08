@@ -4,13 +4,11 @@ name = "rgit"
 version = "0.1.0"
 authors = ["Christian Briones <christian@gmail.com>"]
 
-[dependencies.flate2]
-path = "../flate2"
-
 [dependencies]
 getopts = "0.2.14"
 rust-crypto = "0.2.34"
 rustc-serialize = "0.3.16"
+flate2 = "0.2.13"
 nom = "1.1.0"
 byteorder = "0.4.2"
 hyper = "*"
