@@ -1,5 +1,6 @@
 Rgit
 =====
+[![Build Status](https://travis-ci.org/cwbriones/rgit.svg?branch=master)](https://travis-ci.org/cwbriones/rgit)
 
 This project is a primarily a product of the excellent article
 [git clone in Haskell from the ground up](http://stefan.saasen.me/articles/git-clone-in-haskell-from-the-bottom-up/#implementing_pack_file_negotiation) and my desire for a something somewhat larger than a toy project in Rust.
