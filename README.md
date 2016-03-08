@@ -1,6 +1,8 @@
 Rgit
 =====
 
+[![Clippy Linting Result](http://clippy.bashy.io/github/cwbriones/rgit/master/badge.svg)](http://clippy.bashy.io/github/cwbriones/rgit/master/log)
+
 This project is a primarily a product of the excellent article
 [git clone in Haskell from the ground up](http://stefan.saasen.me/articles/git-clone-in-haskell-from-the-bottom-up/#implementing_pack_file_negotiation) and my desire for a something somewhat larger than a toy project in Rust.
 
