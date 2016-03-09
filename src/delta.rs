@@ -61,12 +61,6 @@ impl DeltaHeader {
     }
 }
 
-#[derive(Debug)]
-enum DeltaOp {
-    Insert(usize),
-    Copy(usize, usize)
-}
-
 struct DeltaPatcher<'a> {
     source: &'a [u8],
     delta: &'a [u8],
@@ -87,14 +81,21 @@ impl<'a> DeltaPatcher<'a> {
     fn run_to_end(&mut self) -> Vec<u8> {
         let target_len = self.target_len;
         let mut result = Vec::with_capacity(target_len);
-        for buf in self {
-            result.extend_from_slice(&buf[..]);
+        for patch in self {
+            result.extend_from_slice(patch);
         }
         assert_eq!(result.len(), target_len);
         result
     }
+}
 
-    fn next_command(&mut self) -> DeltaOp {
+impl<'a> Iterator for DeltaPatcher<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<&'a [u8]> {
+        if self.delta.is_empty() {
+            return None
+        }
         let cmd = self.delta.read_u8().unwrap();
 
         if cmd & 128 > 0 {
@@ -120,37 +121,11 @@ impl<'a> DeltaPatcher<'a> {
                 }
                 shift += 8;
             }
-            DeltaOp::Copy(offset, length)
+            Some(&self.source[offset..offset + length])
         } else {
-            DeltaOp::Insert(cmd as usize)
-        }
-    }
-
-    fn run_command(&mut self, command: DeltaOp) -> Vec<u8> {
-        match command {
-            DeltaOp::Copy(start, length) => {
-                // TODO: This was a quick fix since push_all was not stable for
-                // Rust 1.0
-                self.source.iter().skip(start).take(length).map(|x|{ *x }).collect()
-            },
-            DeltaOp::Insert(length) => {
-                let mut buf = vec![0; length];
-                self.delta.read_exact(&mut buf).unwrap();
-                buf
-            }
+            let insert = &self.delta[..cmd as usize];
+            self.delta = &self.delta[cmd as usize..];
+            Some(insert)
         }
     }
 }
-
-impl<'a> Iterator for DeltaPatcher<'a> {
-    type Item = Vec<u8>;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.delta.is_empty() {
-            None
-        } else {
-            let command = self.next_command();
-            Some(self.run_command(command))
-        }
-    }
-}
-
