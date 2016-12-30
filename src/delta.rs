@@ -76,6 +76,7 @@ struct DeltaPatcher<'a> {
 impl<'a> DeltaPatcher<'a> {
     pub fn new(source: &'a [u8], mut delta: &'a [u8]) -> Self {
         let header = DeltaHeader::new(&mut delta);
+        assert_eq!(header.source_len, source.len());
 
         DeltaPatcher {
             source: source,
@@ -120,6 +121,9 @@ impl<'a> DeltaPatcher<'a> {
                 }
                 shift += 8;
             }
+            if length == 0 {
+                length = 0x10000;
+            }
             DeltaOp::Copy(offset, length)
         } else {
             DeltaOp::Insert(cmd as usize)
@@ -154,3 +158,12 @@ impl<'a> Iterator for DeltaPatcher<'a> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delta_patching() {
+        patch_file("tests/data/deltas/base1.txt", "tests/data/deltas/delta1").unwrap();
+    }
+}
