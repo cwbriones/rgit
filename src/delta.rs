@@ -61,6 +61,12 @@ impl DeltaHeader {
     }
 }
 
+#[derive(Debug)]
+enum DeltaOp {
+    Insert(usize),
+    Copy(usize, usize)
+}
+
 struct DeltaPatcher<'a> {
     source: &'a [u8],
     delta: &'a [u8],
@@ -70,6 +76,7 @@ struct DeltaPatcher<'a> {
 impl<'a> DeltaPatcher<'a> {
     pub fn new(source: &'a [u8], mut delta: &'a [u8]) -> Self {
         let header = DeltaHeader::new(&mut delta);
+        assert_eq!(header.source_len, source.len());
 
         DeltaPatcher {
             source: source,
@@ -80,52 +87,69 @@ impl<'a> DeltaPatcher<'a> {
 
     fn run_to_end(&mut self) -> Vec<u8> {
         let target_len = self.target_len;
-        let mut result = Vec::with_capacity(target_len);
-        for patch in self {
-            result.extend_from_slice(patch);
+        let mut buf = Vec::with_capacity(target_len);
+
+        while let Some(command) = self.read_command() {
+            self.run_command(command, &mut buf);
         }
-        assert_eq!(result.len(), target_len);
-        result
+        assert_eq!(buf.len(), target_len);
+        buf
+    }
+
+    fn read_command(&mut self) -> Option<DeltaOp> {
+        self.delta.read_u8().ok().map(|cmd| {
+            if cmd & 128 > 0 {
+                let mut offset = 0usize;
+                let mut shift = 0usize;
+                let mut length = 0usize;
+
+                // Read the offset to copy from
+                for mask in &[0x01, 0x02, 0x04, 0x08] {
+                    if cmd & mask > 0 {
+                        let byte = self.delta.read_u8().unwrap() as u64;
+                        offset += (byte as usize) << shift;
+                    }
+                    shift += 8;
+                }
+
+                // Read the length of the copy
+                shift = 0;
+                for mask in &[0x10, 0x20, 0x40] {
+                    if cmd & mask > 0 {
+                        let byte = self.delta.read_u8().unwrap() as u64;
+                        length += (byte << shift) as usize;
+                    }
+                    shift += 8;
+                }
+                if length == 0 {
+                    length = 0x10000;
+                }
+                DeltaOp::Copy(offset, length)
+            } else {
+                DeltaOp::Insert(cmd as usize)
+            }
+        })
+    }
+
+    fn run_command(&mut self, command: DeltaOp, buf: &mut Vec<u8>) {
+        match command {
+            DeltaOp::Copy(start, length) => {
+                buf.extend_from_slice(&self.source[start..start + length]);
+            },
+            DeltaOp::Insert(length) => {
+                buf.extend_from_slice(&self.delta[..length]);
+                self.delta = &self.delta[length..];
+            }
+        }
     }
 }
 
-impl<'a> Iterator for DeltaPatcher<'a> {
-    type Item = &'a [u8];
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    fn next(&mut self) -> Option<&'a [u8]> {
-        if self.delta.is_empty() {
-            return None
-        }
-        let cmd = self.delta.read_u8().unwrap();
-
-        if cmd & 128 > 0 {
-            let mut offset = 0usize;
-            let mut shift = 0usize;
-            let mut length = 0usize;
-
-            // Read the offset to copy from
-            for mask in &[0x01, 0x02, 0x04, 0x08] {
-                if cmd & mask > 0 {
-                    let byte = self.delta.read_u8().unwrap() as u64;
-                    offset += (byte as usize) << shift;
-                }
-                shift += 8;
-            }
-
-            // Read the length of the copy
-            shift = 0;
-            for mask in &[0x10, 0x20, 0x40] {
-                if cmd & mask > 0 {
-                    let byte = self.delta.read_u8().unwrap() as u64;
-                    length += (byte << shift) as usize;
-                }
-                shift += 8;
-            }
-            Some(&self.source[offset..offset + length])
-        } else {
-            let insert = &self.delta[..cmd as usize];
-            self.delta = &self.delta[cmd as usize..];
-            Some(insert)
-        }
+    #[test]
+    fn delta_patching() {
+        patch_file("tests/data/deltas/base1.txt", "tests/data/deltas/delta1").unwrap();
     }
 }
