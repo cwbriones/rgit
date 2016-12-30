@@ -87,73 +87,59 @@ impl<'a> DeltaPatcher<'a> {
 
     fn run_to_end(&mut self) -> Vec<u8> {
         let target_len = self.target_len;
-        let mut result = Vec::with_capacity(target_len);
-        for buf in self {
-            result.extend_from_slice(&buf[..]);
+        let mut buf = Vec::with_capacity(target_len);
+
+        while let Some(command) = self.read_command() {
+            self.run_command(command, &mut buf);
         }
-        assert_eq!(result.len(), target_len);
-        result
+        assert_eq!(buf.len(), target_len);
+        buf
     }
 
-    fn next_command(&mut self) -> DeltaOp {
-        let cmd = self.delta.read_u8().unwrap();
+    fn read_command(&mut self) -> Option<DeltaOp> {
+        self.delta.read_u8().ok().map(|cmd| {
+            if cmd & 128 > 0 {
+                let mut offset = 0usize;
+                let mut shift = 0usize;
+                let mut length = 0usize;
 
-        if cmd & 128 > 0 {
-            let mut offset = 0usize;
-            let mut shift = 0usize;
-            let mut length = 0usize;
-
-            // Read the offset to copy from
-            for mask in &[0x01, 0x02, 0x04, 0x08] {
-                if cmd & mask > 0 {
-                    let byte = self.delta.read_u8().unwrap() as u64;
-                    offset += (byte as usize) << shift;
+                // Read the offset to copy from
+                for mask in &[0x01, 0x02, 0x04, 0x08] {
+                    if cmd & mask > 0 {
+                        let byte = self.delta.read_u8().unwrap() as u64;
+                        offset += (byte as usize) << shift;
+                    }
+                    shift += 8;
                 }
-                shift += 8;
-            }
 
-            // Read the length of the copy
-            shift = 0;
-            for mask in &[0x10, 0x20, 0x40] {
-                if cmd & mask > 0 {
-                    let byte = self.delta.read_u8().unwrap() as u64;
-                    length += (byte << shift) as usize;
+                // Read the length of the copy
+                shift = 0;
+                for mask in &[0x10, 0x20, 0x40] {
+                    if cmd & mask > 0 {
+                        let byte = self.delta.read_u8().unwrap() as u64;
+                        length += (byte << shift) as usize;
+                    }
+                    shift += 8;
                 }
-                shift += 8;
+                if length == 0 {
+                    length = 0x10000;
+                }
+                DeltaOp::Copy(offset, length)
+            } else {
+                DeltaOp::Insert(cmd as usize)
             }
-            if length == 0 {
-                length = 0x10000;
-            }
-            DeltaOp::Copy(offset, length)
-        } else {
-            DeltaOp::Insert(cmd as usize)
-        }
+        })
     }
 
-    fn run_command(&mut self, command: DeltaOp) -> Vec<u8> {
+    fn run_command(&mut self, command: DeltaOp, buf: &mut Vec<u8>) {
         match command {
             DeltaOp::Copy(start, length) => {
-                // TODO: This was a quick fix since push_all was not stable for
-                // Rust 1.0
-                self.source.iter().skip(start).take(length).map(|x|{ *x }).collect()
+                buf.extend_from_slice(&self.source[start..start + length]);
             },
             DeltaOp::Insert(length) => {
-                let mut buf = vec![0; length];
-                self.delta.read_exact(&mut buf).unwrap();
-                buf
+                buf.extend_from_slice(&self.delta[..length]);
+                self.delta = &self.delta[length..];
             }
-        }
-    }
-}
-
-impl<'a> Iterator for DeltaPatcher<'a> {
-    type Item = Vec<u8>;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.delta.is_empty() {
-            None
-        } else {
-            let command = self.next_command();
-            Some(self.run_command(command))
         }
     }
 }
