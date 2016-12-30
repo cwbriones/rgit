@@ -44,7 +44,7 @@ macro_rules! subcommand_dispatch {
                     Ok(())
                 }
             }
-        }
+        };
     }
 }
 

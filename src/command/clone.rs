@@ -39,7 +39,7 @@ pub fn execute(params: Params) -> IoResult<()> {
         Ok(url) => {
             // TODO: There has to be a better way to do this.
             let dir = params.dir.unwrap_or_else(|| {
-                url.path().unwrap()
+                url.path_segments().unwrap()
                     .last().unwrap()
                     .split('.')
                     .next().unwrap()
