@@ -30,7 +30,7 @@ impl GitHttpClient {
 impl GitClient for GitHttpClient {
 
     fn discover_refs(&mut self) -> io::Result<Vec<GitRef>> {
-        let discovery_url = [self.url.serialize(), REF_DISCOVERY_ENDPOINT.to_owned()].join("");
+        let discovery_url = [self.url.as_str(), REF_DISCOVERY_ENDPOINT].join("");
         let mut res = self.client.get(&discovery_url).send().unwrap();
 
         // The server first sends a header to verify the service is correct
@@ -51,7 +51,7 @@ impl GitClient for GitHttpClient {
     fn fetch_packfile(&mut self, want: &[GitRef]) -> io::Result<Vec<u8>> {
         let capabilities = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
         let body = super::create_negotiation_request(&capabilities, want);
-        let pack_endpoint = [self.url.serialize(), UPLOAD_PACK_ENDPOINT.to_owned()].join("");
+        let pack_endpoint = [self.url.as_str(), UPLOAD_PACK_ENDPOINT].join("");
 
         let mut res = self.client
             .post(&pack_endpoint)
@@ -84,13 +84,11 @@ fn follow_url(mut url: Url) -> Url {
                 url = Url::parse(loc).unwrap();
             },
             _ => {
-                let followed_url = url.serialize();
-                let qualified_url = if followed_url.ends_with(".git") {
-                    followed_url
-                } else {
-                    [followed_url + ".git"].join("")
+                let mut followed_url = url.to_string();
+                if !followed_url.ends_with(".git") {
+                    followed_url.push_str(".git");
                 };
-                return Url::parse(&qualified_url).unwrap()
+                return Url::parse(&followed_url).unwrap()
             }
         }
     }
