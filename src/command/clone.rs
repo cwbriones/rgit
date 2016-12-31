@@ -45,7 +45,11 @@ pub fn execute(params: Params) -> IoResult<()> {
                     .next().unwrap()
                     .to_owned()
             });
-            (Box::new(GitHttpClient::new(&params.repo)), dir)
+            let mut repo = params.repo.to_owned();
+            if !repo.ends_with(".git") {
+                repo.push_str(".git");
+            }
+            (Box::new(GitHttpClient::new(&repo)), dir)
         },
         Err(_) => {
             let client = try!(GitTcpClient::connect(&params.repo, "127.0.0.1", 9418));
@@ -89,3 +93,27 @@ pub fn execute(params: Params) -> IoResult<()> {
 //    try!(repo.checkout_head());
 //    Ok(())
 //}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use super::*;
+    use std::error::Error;
+    use std::io;
+
+    #[test]
+    fn test_clone() {
+        let dir = "tests/clone-test".to_owned();
+        if let Err(error) = fs::remove_dir_all(&dir) {
+            if error.kind() != io::ErrorKind::NotFound {
+                panic!("Error removing test-clone directory: {}", error.description());
+            }
+        }
+        let params = Params {
+            repo: "https://github.com/cwbriones/rgit.git".to_owned(),
+            dir: Some(dir),
+        };
+        execute(params).unwrap()
+    }
+}
+
