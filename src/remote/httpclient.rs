@@ -2,9 +2,7 @@ use std::io;
 use std::io::Read;
 
 use hyper::Url;
-use hyper::header::Location;
-use hyper::status::StatusCode;
-use hyper::client::{IntoUrl,RedirectPolicy,Client};
+use hyper::client::{IntoUrl,Client};
 
 use super::GitClient;
 use packfile::refs::GitRef;
@@ -53,15 +51,13 @@ impl GitClient for GitHttpClient {
         let body = super::create_negotiation_request(&capabilities, want);
         let pack_endpoint = [self.url.as_str(), UPLOAD_PACK_ENDPOINT].join("");
 
-        let mut res = self.client
+        let res = self.client
             .post(&pack_endpoint)
             .body(&body)
             .send()
             .unwrap();
 
-        let mut contents = Vec::new();
-        try!(res.read_to_end(&mut contents));
-        let mut reader = io::BufReader::new(&contents[..]);
+        let mut reader = io::BufReader::with_capacity(16 * 1024, res);
         super::receive_with_sideband(&mut reader)
     }
 }
@@ -73,23 +69,6 @@ impl GitClient for GitHttpClient {
 /// url and checking that it is fully qualified, since some services (e.g. GitHub)
 /// don't return a redirect when making a packfile request to the wrong URL.
 ///
-fn follow_url(mut url: Url) -> Url {
-    let mut client = Client::new();
-    client.set_redirect_policy(RedirectPolicy::FollowNone);
-    loop {
-        let res = client.get(url.clone()).send().unwrap();
-        match res.status {
-            StatusCode::MovedPermanently => {
-                let &Location(ref loc) = res.headers.get().unwrap();
-                url = Url::parse(loc).unwrap();
-            },
-            _ => {
-                let mut followed_url = url.to_string();
-                if !followed_url.ends_with(".git") {
-                    followed_url.push_str(".git");
-                };
-                return Url::parse(&followed_url).unwrap()
-            }
-        }
-    }
+fn follow_url(url: Url) -> Url {
+    url
 }
