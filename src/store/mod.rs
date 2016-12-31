@@ -268,11 +268,14 @@ struct IndexEntry {
     path: String
 }
 
+// FIXME:
+// This doesn't need to read the file a second time.
 fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: String) -> IoResult<IndexEntry> {
     let file = try!(File::open(path));
     let meta = try!(file.metadata());
 
     // We need to remove the repo path from the path we save on the index entry
+    // FIXME: This doesn't need to be a path since we just discard it again
     let relative_path = PathBuf::from(
             path.trim_left_matches(root)
                 .trim_left_matches('/')

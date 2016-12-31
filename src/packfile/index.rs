@@ -32,7 +32,7 @@ use std::fs::File;
 use std::path::Path;
 
 use store;
-use packfile::Objects;
+use store::GitObject;
 
 type SHA = [u8; 20];
 
@@ -182,8 +182,7 @@ impl PackIndex {
     /// Creates an index from a list of objects and their offsets
     /// into the packfile.
     ///
-    pub fn from_objects(iter: Objects, pack_sha: &str) -> Self {
-        let mut objects = iter.collect::<Vec<_>>();
+    pub fn from_objects(mut objects: Vec<(usize, u32, GitObject)>, pack_sha: &str) -> Self {
         let size = objects.len();
         let mut fanout = [0u32; 256];
         let mut offsets = vec![0; size];
@@ -236,7 +235,6 @@ mod tests {
     static IDX_FILE: &'static str =
         "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.idx";
 
-
     static COMMIT: &'static str = "fb6fb3d9b81142566f4b2466857b0302617768de";
 
     #[test]
@@ -255,7 +253,12 @@ mod tests {
         // match the one which was read when the Packfile::open
         // call was made.
         let pack = PackFile::open(PACK_FILE).unwrap();
-        let index = PackIndex::from_objects(pack.objects(), pack.sha());
+        let index = {
+            let mut bytes = Vec::new();
+            let mut file = File::open(IDX_FILE).unwrap();
+            file.read_to_end(&mut bytes).unwrap();
+            PackIndex::parse(&bytes[..]).unwrap()
+        };
 
         let test_shas = pack.index.shas
             .iter()
