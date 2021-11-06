@@ -34,7 +34,7 @@ use std::path::Path;
 use store;
 use store::GitObject;
 
-type SHA = [u8; 20];
+type Sha = [u8; 20];
 
 static MAGIC: [u8; 4] = [255, 116, 79, 99];
 static VERSION: u32 = 2;
@@ -46,7 +46,7 @@ static VERSION: u32 = 2;
 pub struct PackIndex {
     fanout: [u32; 256],
     offsets: Vec<u32>,
-    shas: Vec<SHA>,
+    shas: Vec<Sha>,
     checksums: Vec<u32>,
     pack_sha: String
 }
@@ -120,10 +120,10 @@ impl PackIndex {
         assert_eq!(idx_sha.to_hex(), checksum);
 
         Ok(PackIndex{
-            fanout: fanout,
-            offsets: offsets,
-            shas: shas,
-            checksums: checksums,
+            fanout,
+            offsets,
+            shas,
+            checksums,
             pack_sha: pack_sha.to_hex()
         })
     }
@@ -173,9 +173,10 @@ impl PackIndex {
         };
         let end = self.fanout[fan] as usize;
 
-        self.shas[start..end].binary_search_by(|ref s| {
-            s[..].cmp(sha)
-        }).and_then(|i| Ok(self.offsets[i + start] as usize)).ok()
+        self.shas[start..end]
+            .binary_search_by(|s| s[..].cmp(sha))
+            .map(|i| self.offsets[i + start] as usize)
+            .ok()
     }
 
     ///
@@ -196,7 +197,7 @@ impl PackIndex {
 
         for (i, &(offset, crc, ref obj)) in objects.iter().enumerate() {
             let mut sha = [0; 20];
-            let vsha = &obj.sha().from_hex().unwrap();
+            let vsha = obj.sha().from_hex().unwrap();
             sha.clone_from_slice(&vsha);
 
             // Checksum should be of packed content in the packfile.
@@ -211,10 +212,10 @@ impl PackIndex {
         }
         assert_eq!(size as u32, fanout[255]);
         PackIndex {
-            fanout: fanout,
-            offsets: offsets,
-            shas: shas,
-            checksums: checksums,
+            fanout,
+            offsets,
+            shas,
+            checksums,
             pack_sha: pack_sha.to_owned()
         }
     }

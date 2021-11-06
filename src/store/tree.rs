@@ -27,9 +27,7 @@ pub enum EntryMode {
 impl Tree {
     pub fn parse(content: &[u8]) -> Option<Self> {
         if let IResult::Done(_, entries) = parse_tree_entries(content) {
-            Some(Tree {
-                entries: entries
-            })
+            Some(Tree { entries } )
         } else {
             None
         }

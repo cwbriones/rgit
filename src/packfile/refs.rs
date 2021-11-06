@@ -41,7 +41,7 @@ pub fn update_head(repo: &str, refs: &[GitRef]) -> IoResult<()> {
         let true_ref = refs.iter().find(|r| r.name != "HEAD" && r.id == *sha1);
         let dir = true_ref
             .map_or("refs/heads/master", |r| &r.name[..]);
-        create_ref(repo, dir, &sha1)?;
+        create_ref(repo, dir, sha1)?;
         create_sym_ref(repo, "HEAD", dir)?;
     }
     Ok(())

@@ -14,8 +14,8 @@ pub struct GitHttpClient {
     client: Client,
 }
 
-const REF_DISCOVERY_ENDPOINT: &'static str = "info/refs?service=git-upload-pack";
-const UPLOAD_PACK_ENDPOINT: &'static str = "git-upload-pack";
+const REF_DISCOVERY_ENDPOINT: &str = "info/refs?service=git-upload-pack";
+const UPLOAD_PACK_ENDPOINT: &str = "git-upload-pack";
 
 impl GitHttpClient {
     pub fn new<U>(u: U) -> Self
@@ -31,10 +31,7 @@ impl GitHttpClient {
             .redirect(redirect::Policy::limited(1))
             .build()
             .unwrap();
-        GitHttpClient {
-            url: url,
-            client: client,
-        }
+        GitHttpClient { url, client }
     }
 }
 

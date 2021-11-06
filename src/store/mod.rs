@@ -68,12 +68,12 @@ impl Repo {
 
         Ok(Repo {
             dir: dir.to_str().unwrap().to_owned(),
-            pack: pack,
+            pack,
         })
     }
 
     pub fn from_packfile(dir: &str, packfile_data: &[u8]) -> IoResult<Self> {
-        let packfile = PackFile::parse(&packfile_data[..])?;
+        let packfile = PackFile::parse(packfile_data)?;
         let mut root = PathBuf::new();
         root.push(dir);
         root.push(".git");
@@ -243,11 +243,10 @@ fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
 
     if contents.starts_with("ref: ") {
         let the_ref = contents.split("ref: ")
-            .skip(1)
-            .next()
+            .nth(1)
             .unwrap()
             .trim();
-        resolve_ref(repo, &the_ref)
+        resolve_ref(repo, the_ref)
     } else {
         Ok(contents.trim().to_owned())
     }
@@ -293,8 +292,8 @@ fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: String) ->
         gid: meta.gid(),
         size: meta.size() as i64,
         sha: decoded_sha,
-        file_mode: file_mode,
-        path: relative_path.to_str().unwrap().to_owned()
+        path: relative_path.to_str().unwrap().to_owned(),
+        file_mode,
     })
 }
 
@@ -376,7 +375,7 @@ fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
     buf.write_u32::<BigEndian>(uid as u32)?;
     buf.write_u32::<BigEndian>(gid as u32)?;
     buf.write_u32::<BigEndian>(size as u32)?;
-    buf.extend_from_slice(&sha);
+    buf.extend_from_slice(sha);
     buf.write_u16::<BigEndian>(flags)?;
     buf.extend(path_and_padding);
     Ok(buf)

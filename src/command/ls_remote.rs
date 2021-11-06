@@ -23,7 +23,7 @@ pub fn spec() -> SubCommand {
 pub fn parse<'a>(matches: &'a ArgMatches) -> Params<'a> {
     let repo = matches.value_of("repo").unwrap();
     Params {
-        repo: repo
+        repo
     }
 }
 
@@ -35,7 +35,7 @@ pub fn execute(params: Params) -> IoResult<()> {
     client.discover_refs().map(|pktlines| {
         for p in &pktlines {
             let &GitRef{ref id, ref name} = p;
-            print!("{}\t{}\n", id, name);
+            println!("{}\t{}", id, name);
         }
     })
 }

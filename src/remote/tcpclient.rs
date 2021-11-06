@@ -20,7 +20,7 @@ impl GitTcpClient {
         let stream = TcpStream::connect((host, port))?;
         Ok(GitTcpClient{
             repo: repo.to_owned(),
-            stream: stream,
+            stream,
             host: host.to_owned(),
             _port: port
         })
@@ -47,7 +47,7 @@ impl GitClient for GitTcpClient {
 
     fn fetch_packfile(&mut self, want: &[GitRef]) -> io::Result<Vec<u8>> {
         let capabilities = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
-        let request = super::create_negotiation_request(&capabilities[..], &want[..]);
+        let request = super::create_negotiation_request(&capabilities[..], want);
         self.stream.write_all(request.as_bytes())?;
 
         super::receive_with_sideband(&mut self.stream)

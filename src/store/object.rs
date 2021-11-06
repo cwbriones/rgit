@@ -38,8 +38,8 @@ pub struct Object {
 impl Object {
     pub fn new(obj_type: ObjectType, content: Vec<u8>) -> Self {
         Object {
-            obj_type: obj_type,
-            content: content,
+            obj_type,
+            content,
             sha: RefCell::new(None)
         }
     }
@@ -47,7 +47,7 @@ impl Object {
     pub fn patch(&self, patch: &[u8]) -> Self {
         Object {
             obj_type: self.obj_type,
-            content: delta::patch(&self.content, &patch),
+            content: delta::patch(&self.content, patch),
             sha: RefCell::new(None)
         }
     }
@@ -78,7 +78,7 @@ impl Object {
         assert_eq!(footer.len(), size);
 
         Ok(Object {
-            obj_type: obj_type,
+            obj_type,
             content: footer,
             sha: RefCell::new(Some(sha1.to_owned()))
         })
@@ -178,7 +178,7 @@ impl Object {
     ///
     pub fn as_commit(&self) -> Option<Commit> {
         if let ObjectType::Commit = self.obj_type {
-            Commit::from_raw(&self)
+            Commit::from_raw(self)
         } else {
             None
         }

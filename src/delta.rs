@@ -79,8 +79,8 @@ impl<'a> DeltaPatcher<'a> {
         assert_eq!(header.source_len, source.len());
 
         DeltaPatcher {
-            source: source,
-            delta: delta,
+            source,
+            delta,
             target_len: header.target_len
         }
     }

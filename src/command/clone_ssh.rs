@@ -35,9 +35,9 @@ pub fn parse<'a>(matches: &'a ArgMatches) -> Params<'a> {
     let repo = matches.value_of("repo").unwrap();
     let user = matches.value_of("user").unwrap();
     Params {
-        host: host,
-        repo: repo,
-        user: user
+        host,
+        repo,
+        user
     }
 }
 

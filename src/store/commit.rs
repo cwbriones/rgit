@@ -18,22 +18,23 @@ pub struct Commit<'a> {
     pub tree: &'a str,
     pub parents: Vec<&'a str>,
     author: Person<'a>,
-    _committer: Person<'a>,
+    #[allow(dead_code)]
+    committer: Person<'a>,
     message: &'a str,
     raw: &'a GitObject
 }
 
 impl<'a> Commit<'a> {
-    pub fn from_raw(obj: &'a GitObject) -> Option<Self> {
-        if let IResult::Done(_, raw_parts) = parse_commit_inner(&obj.content) {
+    pub fn from_raw(raw: &'a GitObject) -> Option<Self> {
+        if let IResult::Done(_, raw_parts) = parse_commit_inner(&raw.content) {
             let (tree, parents, author, committer, message) = raw_parts;
             Some(Commit {
-                tree: tree,
-                parents: parents,
-                author: author,
-                _committer: committer,
-                message: message,
-                raw: obj
+                tree,
+                parents,
+                author,
+                committer,
+                message,
+                raw,
             })
         } else {
             None
@@ -98,11 +99,11 @@ named!(pub parse_person<&[u8],Person>,
             };
             let naive = NaiveDateTime::from_timestamp(ts as i64, 0);
             let offset = FixedOffset::east(sgn * tz/100 * 3600);
-            let datetime = DateTime::from_utc(naive, offset);
+            let timestamp = DateTime::from_utc(naive, offset);
             Person {
-                name: name,
-                email: email,
-                timestamp: datetime
+                name,
+                email,
+                timestamp,
             }
         }
     )
@@ -126,10 +127,8 @@ named!(parse_commit_inner<&[u8], (&str, Vec<&str>, Person, Person, &str)>,
     tag!("committer ") ~
     committer: parse_person ~
     line_ending ~
-    message: map_res!(rest, str::from_utf8) ,
-    || {
-        return (tree, parents, author, committer, message)
-    }
+    message: map_res!(rest, str::from_utf8),
+    || (tree, parents, author, committer, message)
   )
 );
 

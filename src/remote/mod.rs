@@ -52,7 +52,7 @@ fn create_negotiation_request(capabilities: &[&str], refs: &[GitRef]) -> String 
 ///
 fn parse_lines(lines: &[String]) -> (Vec<String>, Vec<GitRef>) {
     assert!(lines.len() > 1);
-    let mut iter = lines.iter().map(|s| s.trim_right());
+    let mut iter = lines.iter().map(|s| s.trim_end());
 
     // First line contains capabilities separated by '\0'
     let mut parsed = Vec::new();

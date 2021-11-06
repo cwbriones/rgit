@@ -31,12 +31,12 @@ pub fn parse(matches: &ArgMatches) -> Params {
     let dir  = matches.value_of("dir").map(|s| s.to_owned());
     Params {
         repo: repo.to_owned(),
-        dir: dir
+        dir
     }
 }
 
 pub fn execute(params: Params) -> IoResult<()> {
-    let (mut client, dir): (Box<GitClient>, _) = match params.repo.parse::<Url>() {
+    let (mut client, dir): (Box<dyn GitClient>, _) = match params.repo.parse::<Url>() {
         Ok(uri) => {
             // TODO: There has to be a better way to do this.
             let dir = params.dir.unwrap_or_else(|| {
@@ -57,8 +57,8 @@ pub fn execute(params: Params) -> IoResult<()> {
             if !repo.ends_with(".git") {
                 repo.push_str(".git");
             }
-            if !repo.ends_with("/") {
-                repo.push_str("/");
+            if !repo.ends_with('/') {
+                repo.push('/');
             }
             (Box::new(GitHttpClient::new(&repo)), dir)
         },
@@ -109,7 +109,6 @@ pub fn execute(params: Params) -> IoResult<()> {
 mod tests {
     use std::fs;
     use super::*;
-    use std::error::Error;
     use std::io;
 
     #[test]
@@ -117,7 +116,7 @@ mod tests {
         let dir = "tests/clone-test".to_owned();
         if let Err(error) = fs::remove_dir_all(&dir) {
             if error.kind() != io::ErrorKind::NotFound {
-                panic!("Error removing test-clone directory: {}", error.description());
+                panic!("Error removing test-clone directory: {}", error);
             }
         }
         let params = Params {

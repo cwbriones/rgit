@@ -1,4 +1,4 @@
-use ssh2::{Session};
+use ssh2::Session;
 
 use std::io::Write;
 use std::io::Result as IoResult;
@@ -26,7 +26,7 @@ impl GitSSHClient {
         assert!(sess.authenticated());
 
         GitSSHClient {
-            sess: sess,
+            sess,
             repo: repo.to_owned(),
         }
     }
@@ -55,7 +55,7 @@ impl GitClient for GitSSHClient {
         super::receive(&mut chan)?;
         //let (_server_capabilities, refs) = super::parse_lines(&response);
 
-        let request = super::create_negotiation_request(&capabilities[..], &want[..]);
+        let request = super::create_negotiation_request(&capabilities[..], want);
 
         chan.write_all(request.as_bytes())?;
         super::receive_with_sideband(&mut chan)

@@ -8,12 +8,10 @@ use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
 use crc::Crc;
 
 use std::fs::{self, File};
-use std::path::{Path,PathBuf};
+use std::path::Path;
 use std::io::{Read,Write};
 use std::io::Result as IoResult;
 use std::collections::HashMap;
-
-use std::error::Error;
 
 use store;
 use store::{GitObject, GitObjectType};
@@ -43,11 +41,7 @@ pub enum PackObject {
 
 impl PackObject {
     pub fn is_base(&self) -> bool {
-        if let PackObject::Base(_) = *self {
-            true
-        } else {
-            false
-        }
+        matches!(*self, PackObject::Base(_))
     }
 
     pub fn unwrap(self) -> GitObject {
@@ -71,7 +65,7 @@ impl PackObject {
             PackObject::RefDelta(_, ref c) => &c[..],
             PackObject::OfsDelta(_, ref c) => &c[..],
         };
-        let mut crc = Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
+        let crc = Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
         crc.checksum(content)
     }
 }
@@ -111,19 +105,19 @@ impl PackFile {
             let index = idx.unwrap_or_else(|| PackIndex::from_objects(objects, &sha_computed));
 
             Ok(PackFile {
-                version: version,
-                num_objects: num_objects,
+                version,
+                num_objects,
                 encoded_objects: contents.to_vec(),
                 sha: sha_computed,
-                index: index
+                index,
             })
         } else {
           unreachable!("Packfile failed to parse");
         }
     }
 
-    pub fn write(&self, root: &PathBuf) -> IoResult<()> {
-        let mut path = root.clone();
+    pub fn write(&self, root: &Path) -> IoResult<()> {
+        let mut path = root.to_path_buf();
         path.push("objects/pack");
         fs::create_dir_all(&path)?;
         path.push(format!("pack-{}", self.sha()));
@@ -207,11 +201,10 @@ impl PackFile {
                 },
                 _ => unreachable!()
             }
-            if next.is_some() {
-                object = next.unwrap()
-            } else {
+            match next {
+                Some(o) => { object = o; }
                 // This should be an error that the object is incomplete
-                return Ok(None)
+                None => return Ok(None)
             }
         }
         // The patches then look like: vec![patch3, patch2, patch1]
@@ -354,7 +347,7 @@ pub struct ObjectReader<R> {
 impl<R> ObjectReader<R> where R: Read {
     pub fn new(inner: R) -> Self {
         ObjectReader {
-            inner: inner,
+            inner,
             pos: 0,
             cap: 0,
             consumed_bytes: 0,
@@ -450,7 +443,7 @@ impl<R> ObjectReader<R> where R: Read {
                 },
                 Ok(Status::BufError) => panic!("Encountered zlib buffer error"),
                 Ok(Status::Ok) => (),
-                Err(e) => panic!("Encountered zlib decompression error: {}", e.description()),
+                Err(e) => panic!("Encountered zlib decompression error: {}", e),
             }
         }
     }

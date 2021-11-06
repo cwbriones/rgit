@@ -17,7 +17,7 @@ pub fn spec() -> SubCommand {
 pub fn parse<'a>(matches: &'a ArgMatches) -> Params<'a> {
     let revision = matches.value_of("revision");
     Params {
-        revision: revision
+        revision
     }
 }
 
@@ -26,6 +26,6 @@ pub fn execute(params: Params) -> IoResult<()> {
     let rev = params.revision.unwrap_or("HEAD");
     // Refactor this into a commit walker and pass a closure that calls
     // std::process::Command::new("less") to pipe it
-    repo.log(&rev)?;
+    repo.log(rev)?;
     Ok(())
 }
