@@ -17,8 +17,8 @@ pub fn create_refs(repo: &str, refs: &[GitRef]) -> IoResult<()> {
             r.name.starts_with("refs/tags")
         });
 
-    try!(write_refs(repo, "refs/remotes/origin", &branches));
-    try!(write_refs(repo, "refs/tags", &tags));
+    write_refs(repo, "refs/remotes/origin", &branches)?;
+    write_refs(repo, "refs/tags", &tags)?;
     Ok(())
 }
 
@@ -30,7 +30,7 @@ fn write_refs(repo: &str, parent_path: &str, refs: &[&GitRef]) -> IoResult<()> {
         let mut full_path = path.clone();
         let simple_name = Path::new(&r.name).file_name().unwrap();
         full_path.push(&simple_name);
-        try!(create_ref(repo, full_path.to_str().unwrap(), &r.id));
+        create_ref(repo, full_path.to_str().unwrap(), &r.id)?;
     }
     Ok(())
 }
@@ -41,8 +41,8 @@ pub fn update_head(repo: &str, refs: &[GitRef]) -> IoResult<()> {
         let true_ref = refs.iter().find(|r| r.name != "HEAD" && r.id == *sha1);
         let dir = true_ref
             .map_or("refs/heads/master", |r| &r.name[..]);
-        try!(create_ref(repo, dir, &sha1));
-        try!(create_sym_ref(repo, "HEAD", dir));
+        create_ref(repo, dir, &sha1)?;
+        create_sym_ref(repo, "HEAD", dir)?;
     }
     Ok(())
 }
@@ -55,9 +55,9 @@ fn create_ref(repo: &str, path: &str, id: &str) -> IoResult<()> {
     full_path.push(repo);
     full_path.push(".git");
     full_path.push(path);
-    try!(fs::create_dir_all(full_path.parent().unwrap()));
-    let mut file = try!(File::create(full_path));
-    try!(file.write_fmt(format_args!("{}\n", id)));
+    fs::create_dir_all(full_path.parent().unwrap())?;
+    let mut file = File::create(full_path)?;
+    file.write_fmt(format_args!("{}\n", id))?;
     Ok(())
 }
 
@@ -69,7 +69,7 @@ fn create_sym_ref(repo: &str, name: &str, the_ref: &str) -> IoResult<()> {
     path.push(repo);
     path.push(".git");
     path.push(name);
-    let mut file = try!(File::create(path));
-    try!(file.write_fmt(format_args!("ref: {}\n", the_ref)));
+    let mut file = File::create(path)?;
+    file.write_fmt(format_args!("ref: {}\n", the_ref))?;
     Ok(())
 }

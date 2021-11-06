@@ -22,10 +22,10 @@ pub fn parse<'a>(matches: &'a ArgMatches) -> Params<'a> {
 }
 
 pub fn execute(params: Params) -> IoResult<()> {
-    let repo = try!(Repo::from_enclosing());
+    let repo = Repo::from_enclosing()?;
     let rev = params.revision.unwrap_or("HEAD");
     // Refactor this into a commit walker and pass a closure that calls
     // std::process::Command::new("less") to pipe it
-    try!(repo.log(&rev));
+    repo.log(&rev)?;
     Ok(())
 }

@@ -36,7 +36,7 @@ impl Repo {
     ///
     pub fn from_enclosing() -> IoResult<Self> {
         // Navigate upwards until we are in the repo
-        let mut dir = try!(env::current_dir());
+        let mut dir = env::current_dir()?;
         while !is_git_repo(&dir) {
             assert!(dir.pop(), "Not in a git repo");
         }
@@ -48,7 +48,7 @@ impl Repo {
 
         let pack_path = if p.exists() {
             let mut the_path = String::new();
-            for dir_entry in try!(fs::read_dir(p)) {
+            for dir_entry in fs::read_dir(p)? {
                 let d = dir_entry.unwrap();
                 let fname = d.file_name();
                 let s = fname.to_str().unwrap();
@@ -73,11 +73,11 @@ impl Repo {
     }
 
     pub fn from_packfile(dir: &str, packfile_data: &[u8]) -> IoResult<Self> {
-        let packfile = try!(PackFile::parse(&packfile_data[..]));
+        let packfile = PackFile::parse(&packfile_data[..])?;
         let mut root = PathBuf::new();
         root.push(dir);
         root.push(".git");
-        try!(packfile.write(&root));
+        packfile.write(&root)?;
 
         Ok(Repo {
             dir: dir.to_owned(),
@@ -90,11 +90,11 @@ impl Repo {
     /// of the repository.
     ///
     pub fn checkout_head(&self) -> IoResult<()> {
-        let tip = try!(resolve_ref(&self.dir, "HEAD"));
+        let tip = resolve_ref(&self.dir, "HEAD")?;
         let mut idx = Vec::new();
         // FIXME: This should also "bubble up" errors, walk needs to return a result.
         self.walk(&tip).and_then(|t| self.walk_tree(&self.dir, &t, &mut idx).ok());
-        try!(write_index(&self.dir, &mut idx[..]));
+        write_index(&self.dir, &mut idx[..])?;
         Ok(())
     }
 
@@ -124,17 +124,17 @@ impl Repo {
             full_path.push(path);
             match *mode {
                 EntryMode::SubDirectory => {
-                    try!(fs::create_dir_all(&full_path));
+                    fs::create_dir_all(&full_path)?;
                     let path_str = full_path.to_str().unwrap();
                     self.walk(sha).and_then(|t| {
                         self.walk_tree(path_str, &t, idx).ok()
                     });
                 },
                 EntryMode::Normal | EntryMode::Executable => {
-                    let object = try!(self.read_object(sha));
-                    let mut file = try!(File::create(&full_path));
-                    try!(file.write_all(&object.content[..]));
-                    let meta = try!(file.metadata());
+                    let object = self.read_object(sha)?;
+                    let mut file = File::create(&full_path)?;
+                    file.write_all(&object.content[..])?;
+                    let meta = file.metadata()?;
                     let mut perms = meta.permissions();
 
                     let raw_mode = match *mode {
@@ -142,13 +142,13 @@ impl Repo {
                         _ => 33261
                     };
                     perms.set_mode(raw_mode);
-                    try!(fs::set_permissions(&full_path, perms));
+                    fs::set_permissions(&full_path, perms)?;
 
-                    let idx_entry = try!(get_index_entry(
+                    let idx_entry = get_index_entry(
                         &self.dir,
                         full_path.to_str().unwrap(),
                         mode.clone(),
-                        sha.clone()));
+                        sha.clone())?;
                     idx.push(idx_entry);
                 },
                 ref e => panic!("Unsupported Entry Mode {:?}", e)
@@ -178,9 +178,9 @@ impl Repo {
     }
 
     pub fn log(&self, rev: &str) -> IoResult<()> {
-        let mut sha = try!(resolve_ref(&self.dir, rev));
+        let mut sha = resolve_ref(&self.dir, rev)?;
         loop {
-            let object = try!(self.read_object(&sha));
+            let object = self.read_object(&sha)?;
             let commit = object.as_commit().expect("Tried to log an object that wasn't a commit");
             println!("{}", commit);
             if commit.parents.is_empty() {
@@ -238,8 +238,8 @@ fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
 
     // Read the actual ref out
     let mut contents = String::new();
-    let mut file = try!(File::open(path));
-    try!(file.read_to_string(&mut contents));
+    let mut file = File::open(path)?;
+    file.read_to_string(&mut contents)?;
 
     if contents.starts_with("ref: ") {
         let the_ref = contents.split("ref: ")
@@ -271,14 +271,14 @@ struct IndexEntry {
 // FIXME:
 // This doesn't need to read the file a second time.
 fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: String) -> IoResult<IndexEntry> {
-    let file = try!(File::open(path));
-    let meta = try!(file.metadata());
+    let file = File::open(path)?;
+    let meta = file.metadata()?;
 
     // We need to remove the repo path from the path we save on the index entry
     // FIXME: This doesn't need to be a path since we just discard it again
     let relative_path = PathBuf::from(
-            path.trim_left_matches(root)
-                .trim_left_matches('/')
+            path.trim_start_matches(root)
+                .trim_start_matches('/')
         );
     // FIXME: This error is not handled.
     let decoded_sha = sha.from_hex().unwrap();
@@ -303,20 +303,20 @@ fn write_index(repo: &str, entries: &mut [IndexEntry]) -> IoResult<()> {
     path.push(repo);
     path.push(".git");
     path.push("index");
-    let mut idx_file = try!(File::create(path));
-    let encoded = try!(encode_index(entries));
-    try!(idx_file.write_all(&encoded[..]));
+    let mut idx_file = File::create(path)?;
+    let encoded = encode_index(entries)?;
+    idx_file.write_all(&encoded[..])?;
     Ok(())
 }
 
 fn encode_index(idx: &mut [IndexEntry]) -> IoResult<Vec<u8>> {
-    let mut encoded = try!(index_header(idx.len()));
+    let mut encoded = index_header(idx.len())?;
     idx.sort_by(|a, b| a.path.cmp(&b.path));
-    let entries: Result<Vec<_>, _> =
+    let entries =
         idx.iter()
         .map(|e| encode_entry(e))
-        .collect();
-    let mut encoded_entries = try!(entries).concat();
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut encoded_entries = entries.concat();
     encoded.append(&mut encoded_entries);
     let mut hash = sha1_hash(&encoded);
     encoded.append(&mut hash);
@@ -366,18 +366,18 @@ fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
         v
     };
 
-    try!(buf.write_u32::<BigEndian>(ctime as u32));
-    try!(buf.write_u32::<BigEndian>(0u32));
-    try!(buf.write_u32::<BigEndian>(mtime as u32));
-    try!(buf.write_u32::<BigEndian>(0u32));
-    try!(buf.write_u32::<BigEndian>(device as u32));
-    try!(buf.write_u32::<BigEndian>(inode as u32));
-    try!(buf.write_u32::<BigEndian>(encoded_mode));
-    try!(buf.write_u32::<BigEndian>(uid as u32));
-    try!(buf.write_u32::<BigEndian>(gid as u32));
-    try!(buf.write_u32::<BigEndian>(size as u32));
+    buf.write_u32::<BigEndian>(ctime as u32)?;
+    buf.write_u32::<BigEndian>(0u32)?;
+    buf.write_u32::<BigEndian>(mtime as u32)?;
+    buf.write_u32::<BigEndian>(0u32)?;
+    buf.write_u32::<BigEndian>(device as u32)?;
+    buf.write_u32::<BigEndian>(inode as u32)?;
+    buf.write_u32::<BigEndian>(encoded_mode)?;
+    buf.write_u32::<BigEndian>(uid as u32)?;
+    buf.write_u32::<BigEndian>(gid as u32)?;
+    buf.write_u32::<BigEndian>(size as u32)?;
     buf.extend_from_slice(&sha);
-    try!(buf.write_u16::<BigEndian>(flags));
+    buf.write_u16::<BigEndian>(flags)?;
     buf.extend(path_and_padding);
     Ok(buf)
 }
@@ -386,9 +386,9 @@ fn index_header(num_entries: usize) -> IoResult<Vec<u8>> {
     let mut header = Vec::with_capacity(12);
     let magic = 1145655875; // "DIRC"
     let version: u32 = 2;
-    try!(header.write_u32::<BigEndian>(magic));
-    try!(header.write_u32::<BigEndian>(version));
-    try!(header.write_u32::<BigEndian>(num_entries as u32));
+    header.write_u32::<BigEndian>(magic)?;
+    header.write_u32::<BigEndian>(version)?;
+    header.write_u32::<BigEndian>(num_entries as u32)?;
     Ok(header)
 }
 

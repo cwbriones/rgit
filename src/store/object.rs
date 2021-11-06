@@ -59,7 +59,7 @@ impl Object {
         let path = object_path(repo, sha1);
 
         let mut inflated = Vec::new();
-        let file = try!(File::open(path));
+        let file = File::open(path)?;
         let mut z = ZlibDecoder::new(file);
         z.read_to_end(&mut inflated).expect("Error inflating object");
 
@@ -119,11 +119,11 @@ impl Object {
         let (sha1, blob) = self.encode();
         let path = object_path(repo, &sha1);
 
-        try!(fs::create_dir_all(path.parent().unwrap()));
+        fs::create_dir_all(path.parent().unwrap())?;
 
-        let file = try!(File::create(&path));
+        let file = File::create(&path)?;
         let mut z = ZlibEncoder::new(file, Compression::Default);
-        try!(z.write_all(&blob[..]));
+        z.write_all(&blob[..])?;
         Ok(())
     }
 

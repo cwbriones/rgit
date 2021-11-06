@@ -50,15 +50,15 @@ pub fn execute(params: Params) -> IoResult<()> {
 
     println!("Cloning into \"{}\"...", dir);
 
-    let refs = try!(client.discover_refs());
-    let packfile_data = try!(client.fetch_packfile(&refs));
+    let refs = client.discover_refs()?;
+    let packfile_data = client.fetch_packfile(&refs)?;
 
-    let repo = try!(Repo::from_packfile(dir, &packfile_data));
+    let repo = Repo::from_packfile(dir, &packfile_data)?;
 
-    try!(refs::create_refs(dir, &refs));
-    try!(refs::update_head(dir, &refs));
+    refs::create_refs(dir, &refs)?;
+    refs::update_head(dir, &refs)?;
 
     // Checkout head and format refs
-    try!(repo.checkout_head());
+    repo.checkout_head()?;
     Ok(())
 }

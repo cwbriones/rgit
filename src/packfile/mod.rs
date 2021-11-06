@@ -80,11 +80,11 @@ impl PackFile {
     pub fn open<P: AsRef<Path>>(p: P) -> IoResult<Self> {
         let path = p.as_ref();
         let mut contents = Vec::new();
-        let mut file = try!(File::open(path));
-        try!(file.read_to_end(&mut contents));
+        let mut file = File::open(path)?;
+        file.read_to_end(&mut contents)?;
 
         let idx_path = path.with_extension("idx");
-        let idx = try!(PackIndex::open(idx_path));
+        let idx = PackIndex::open(idx_path)?;
 
         PackFile::parse_with_index(&contents, idx)
     }
@@ -96,9 +96,9 @@ impl PackFile {
     fn parse_with_index(mut contents: &[u8], idx: Option<PackIndex>) -> IoResult<Self> {
         let sha_computed = store::sha1_hash_hex(&contents[..contents.len() - 20]);
 
-        let magic = try!(contents.read_u32::<BigEndian>());
-        let version = try!(contents.read_u32::<BigEndian>());
-        let num_objects = try!(contents.read_u32::<BigEndian>()) as usize;
+        let magic = contents.read_u32::<BigEndian>()?;
+        let version = contents.read_u32::<BigEndian>()?;
+        let num_objects = contents.read_u32::<BigEndian>()? as usize;
 
         if magic == MAGIC_HEADER {
             let contents_len = contents.len();
@@ -125,32 +125,32 @@ impl PackFile {
     pub fn write(&self, root: &PathBuf) -> IoResult<()> {
         let mut path = root.clone();
         path.push("objects/pack");
-        try!(fs::create_dir_all(&path));
+        fs::create_dir_all(&path)?;
         path.push(format!("pack-{}", self.sha()));
         path.set_extension("pack");
 
         let mut idx_path = path.clone();
         idx_path.set_extension("idx");
 
-        let mut pack_file = try!(File::create(&path));
-        let mut idx_file = try!(File::create(&idx_path));
+        let mut pack_file = File::create(&path)?;
+        let mut idx_file = File::create(&idx_path)?;
 
-        let pack = try!(self.encode());
-        try!(pack_file.write_all(&pack));
+        let pack = self.encode()?;
+        pack_file.write_all(&pack)?;
 
-        let idx = try!(self.index.encode());
-        try!(idx_file.write_all(&idx));
+        let idx = self.index.encode()?;
+        idx_file.write_all(&idx)?;
         Ok(())
     }
 
     pub fn encode(&self) -> IoResult<Vec<u8>> {
         let mut encoded = Vec::with_capacity(HEADER_LENGTH + self.encoded_objects.len());
-        try!(encoded.write_u32::<BigEndian>(MAGIC_HEADER));
-        try!(encoded.write_u32::<BigEndian>(self.version));
-        try!(encoded.write_u32::<BigEndian>(self.num_objects as u32));
-        try!(encoded.write_all(&self.encoded_objects));
+        encoded.write_u32::<BigEndian>(MAGIC_HEADER)?;
+        encoded.write_u32::<BigEndian>(self.version)?;
+        encoded.write_u32::<BigEndian>(self.num_objects as u32)?;
+        encoded.write_all(&self.encoded_objects)?;
         let checksum = store::sha1_hash(&encoded);
-        try!(encoded.write_all(&checksum));
+        encoded.write_all(&checksum)?;
         Ok(encoded)
     }
 
@@ -169,7 +169,7 @@ impl PackFile {
     fn find_by_sha_unresolved(&self, sha: &str) -> IoResult<Option<PackObject>> {
         let off = sha.from_hex().ok().and_then(|s| self.index.find(&s));
         match off {
-            Some(offset) => Ok(Some(try!(self.read_at_offset(offset)))),
+            Some(offset) => Ok(Some(self.read_at_offset(offset)?)),
             None => Ok(None)
         }
     }
@@ -178,7 +178,7 @@ impl PackFile {
         // Read the initial offset.
         //
         // If it is a base object, return the enclosing object.
-        let mut object = try!(self.read_at_offset(offset));
+        let mut object = self.read_at_offset(offset)?;
         if let PackObject::Base(base) = object {
             return Ok(Some(base));
         };
@@ -199,11 +199,11 @@ impl PackFile {
                     // We don't need to store multiple chains because a delta chain
                     // will either be offsets or shas but not both.
                     offset -= delta_offset;
-                    next = Some(try!(self.read_at_offset(offset)));
+                    next = Some(self.read_at_offset(offset)?);
                 },
                 PackObject::RefDelta(sha, patch) => {
                     patches.push(patch);
-                    next = try!(self.find_by_sha_unresolved(&sha.to_hex()));
+                    next = self.find_by_sha_unresolved(&sha.to_hex())?;
                 },
                 _ => unreachable!()
             }
@@ -363,7 +363,7 @@ impl<R> ObjectReader<R> where R: Read {
     }
 
     pub fn read_object(&mut self) -> IoResult<PackObject> {
-        let mut c = try!(self.read_u8());
+        let mut c = self.read_u8()?;
         let type_id = (c >> 4) & 7;
 
         let mut size: usize = (c & 15) as usize;
@@ -373,14 +373,14 @@ impl<R> ObjectReader<R> where R: Read {
         // Read the MSB and check if we need to continue
         // consuming bytes to get the object size
         while c & 0x80 > 0 {
-            c = try!(self.read_u8());
+            c = self.read_u8()?;
             size += ((c & 0x7f) as usize) << shift;
             shift += 7;
         }
 
         match type_id {
             1 | 2 | 3 | 4 => {
-                let content = try!(self.read_object_content(size));
+                let content = self.read_object_content(size)?;
                 let base_type = match type_id {
                     1 => GitObjectType::Commit,
                     2 => GitObjectType::Tree,
@@ -391,14 +391,14 @@ impl<R> ObjectReader<R> where R: Read {
                 Ok(PackObject::Base(GitObject::new(base_type, content)))
             },
             6 => {
-                let offset = try!(self.read_offset());
-                let content = try!(self.read_object_content(size));
+                let offset = self.read_offset()?;
+                let content = self.read_object_content(size)?;
                 Ok(PackObject::OfsDelta(offset, content))
             },
             7 => {
                 let mut base: [u8; 20] = [0; 20];
-                try!(self.read_exact(&mut base));
-                let content = try!(self.read_object_content(size));
+                self.read_exact(&mut base)?;
+                let content = self.read_object_content(size)?;
                 Ok(PackObject::RefDelta(base, content))
             }
             _ => panic!("Unexpected id for git object")
@@ -412,10 +412,10 @@ impl<R> ObjectReader<R> where R: Read {
     // for n >= 2 adding 2^7 + 2^14 + ... + 2^(7*(n-1))
     // to the result.
     fn read_offset(&mut self) -> IoResult<usize> {
-        let mut c = try!(self.read_u8());
+        let mut c = self.read_u8()?;
         let mut offset = (c & 0x7f) as usize;
         while c & 0x80 != 0 {
-            c = try!(self.read_u8());
+            c = self.read_u8()?;
             offset += 1;
             offset <<= 7;
             offset += (c & 0x7f) as usize;
@@ -434,7 +434,7 @@ impl<R> ObjectReader<R> where R: Read {
         loop {
             let last_total_in = decompressor.total_in();
             let res = {
-                let zlib_buffer = try!(self.fill_buffer());
+                let zlib_buffer = self.fill_buffer()?;
                 decompressor.decompress_vec(zlib_buffer, &mut object_buffer, Flush::None)
             };
             let nread = decompressor.total_in() - last_total_in;
@@ -459,7 +459,7 @@ impl<R> ObjectReader<R> where R: Read {
         // If we've reached the end of our internal buffer then we need to fetch
         // some more data from the underlying reader.
         if self.pos == self.cap {
-            self.cap = try!(self.inner.read(&mut self.buf));
+            self.cap = self.inner.read(&mut self.buf)?;
             self.pos = 0;
         }
         Ok(&self.buf[self.pos..self.cap])
@@ -477,15 +477,15 @@ impl<R: Read> Read for ObjectReader<R> {
         // (larger than our internal buffer), bypass our internal buffer
         // entirely.
         if self.pos == self.cap && buf.len() >= self.buf.len() {
-            let nread = try!(self.inner.read(buf));
+            let nread = self.inner.read(buf)?;
             // We still want to keep track of the correct offset so
             // we consider this consumed.
             self.consumed_bytes += nread;
             return Ok(nread);
         }
         let nread = {
-            let mut rem = try!(self.fill_buffer());
-            try!(rem.read(buf))
+            let mut rem = self.fill_buffer()?;
+            rem.read(buf)?
         };
         self.consume(nread);
 

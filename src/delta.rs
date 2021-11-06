@@ -12,14 +12,14 @@ pub fn patch(source: &[u8], delta: &[u8]) -> Vec<u8> {
 }
 
 pub fn patch_file(source_path: &str, delta_path: &str) -> IoResult<()> {
-    let mut source_file = try!(File::open(source_path));
+    let mut source_file = File::open(source_path)?;
     let mut source_contents = Vec::new();
 
-    let mut delta_file = try!(File::open(delta_path));
+    let mut delta_file = File::open(delta_path)?;
     let mut delta_contents = Vec::new();
 
-    try!(source_file.read_to_end(&mut source_contents));
-    try!(delta_file.read_to_end(&mut delta_contents));
+    source_file.read_to_end(&mut source_contents)?;
+    delta_file.read_to_end(&mut delta_contents)?;
 
     let mut patcher = DeltaPatcher::new(&source_contents[..], &delta_contents[..]);
     let res = patcher.run_to_end();

@@ -43,19 +43,19 @@ impl<'a> Commit<'a> {
 
 impl<'a> Display for Person<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        try!(writeln!(f, "Author: {} <{}>", self.name, self.email));
+        writeln!(f, "Author: {} <{}>", self.name, self.email)?;
         let formatted = self.timestamp.format("%a %b %-e %T %Y %z");
-        try!(writeln!(f, "Date:   {}", formatted));
+        writeln!(f, "Date:   {}", formatted)?;
         Ok(())
     }
 }
 
 impl<'a> Display for Commit<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        try!(writeln!(f, "commit {}", self.raw.sha()));
-        try!(write!(f, "{}", self.author));
+        writeln!(f, "commit {}", self.raw.sha())?;
+        write!(f, "{}", self.author)?;
         for line in self.message.split('\n') {
-            try!(write!(f, "\n    {}", line));
+            write!(f, "\n    {}", line)?;
         }
         Ok(())
     }

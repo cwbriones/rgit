@@ -17,7 +17,7 @@ impl GitTcpClient {
     //pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
     #[allow(dead_code)]
     pub fn connect(repo: &str, host: &str, port: u16) -> io::Result<Self> {
-        let stream = try!(TcpStream::connect((host, port)));
+        let stream = TcpStream::connect((host, port))?;
         Ok(GitTcpClient{
             repo: repo.to_owned(),
             stream: stream,
@@ -38,9 +38,9 @@ impl GitTcpClient {
 impl GitClient for GitTcpClient {
     fn discover_refs(&mut self) -> io::Result<Vec<GitRef>> {
         let payload = self.git_proto_request();
-        try!(self.stream.write_all(payload.as_bytes()));
+        self.stream.write_all(payload.as_bytes())?;
 
-        let response = try!(super::receive(&mut self.stream));
+        let response = super::receive(&mut self.stream)?;
         let (_server_capabilities, refs) = super::parse_lines(&response);
         Ok(refs)
     }
@@ -48,7 +48,7 @@ impl GitClient for GitTcpClient {
     fn fetch_packfile(&mut self, want: &[GitRef]) -> io::Result<Vec<u8>> {
         let capabilities = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
         let request = super::create_negotiation_request(&capabilities[..], &want[..]);
-        try!(self.stream.write_all(request.as_bytes()));
+        self.stream.write_all(request.as_bytes())?;
 
         super::receive_with_sideband(&mut self.stream)
     }

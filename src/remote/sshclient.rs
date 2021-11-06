@@ -38,7 +38,7 @@ impl GitClient for GitSSHClient {
         let command = format!("git-upload-pack {}", self.repo);
         chan.exec(&command).unwrap();
 
-        let response = try!(super::receive(&mut chan));
+        let response = super::receive(&mut chan)?;
         let (_server_capabilities, refs) = super::parse_lines(&response);
         Ok(refs)
     }
@@ -52,12 +52,12 @@ impl GitClient for GitSSHClient {
         let mut chan = self.sess.channel_session().unwrap();
         chan.exec(&command).unwrap();
 
-        try!(super::receive(&mut chan));
+        super::receive(&mut chan)?;
         //let (_server_capabilities, refs) = super::parse_lines(&response);
 
         let request = super::create_negotiation_request(&capabilities[..], &want[..]);
 
-        try!(chan.write_all(request.as_bytes()));
+        chan.write_all(request.as_bytes())?;
         super::receive_with_sideband(&mut chan)
     }
 }

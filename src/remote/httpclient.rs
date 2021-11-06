@@ -49,15 +49,15 @@ impl GitClient for GitHttpClient {
             .unwrap();
 
         // The server first sends a header to verify the service is correct
-        let first = try!(super::read_packet_line(&mut res)).unwrap();
+        let first = super::read_packet_line(&mut res)?.unwrap();
         assert_eq!(first, b"# service=git-upload-pack\n");
 
         // The server then sends a flush packet "0000"
         let mut flush = [0; 4];
-        try!(res.read_exact(&mut flush));
+        res.read_exact(&mut flush)?;
         assert_eq!(&flush, b"0000");
 
-        let decoded = try!(super::receive(&mut res));
+        let decoded = super::receive(&mut res)?;
         let (_server_capabilities, refs) = super::parse_lines(&decoded);
 
         Ok(refs)

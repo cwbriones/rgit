@@ -63,7 +63,7 @@ impl PackIndex {
             Err(io) => return Err(io),
         };
         let mut contents = Vec::new();
-        try!(file.read_to_end(&mut contents));
+        file.read_to_end(&mut contents)?;
         Self::parse(&contents).map(|parsed| {
             Some(parsed)
         })
@@ -75,16 +75,16 @@ impl PackIndex {
 
         // Parse header
         let mut magic = [0; 4];
-        try!(content.read_exact(&mut magic));
+        content.read_exact(&mut magic)?;
         assert_eq!(magic, MAGIC);
 
-        let version = try!(content.read_u32::<BigEndian>());
+        let version = content.read_u32::<BigEndian>()?;
         assert_eq!(version, VERSION);
 
         // Parse Fanout table
         let mut fanout = [0; 256];
         for f in fanout.iter_mut() {
-            *f = try!(content.read_u32::<BigEndian>());
+            *f = content.read_u32::<BigEndian>()?;
         }
         let size = fanout[255] as usize;
 
@@ -92,30 +92,30 @@ impl PackIndex {
         let mut shas = Vec::with_capacity(size);
         for _ in 0..size {
             let mut sha = [0; 20];
-            try!(content.read_exact(&mut sha));
+            content.read_exact(&mut sha)?;
             shas.push(sha);
         }
 
         // Parse N Checksums
         let mut checksums = Vec::with_capacity(size);
         for _ in 0..size {
-            let crc = try!(content.read_u32::<BigEndian>());
+            let crc = content.read_u32::<BigEndian>()?;
             checksums.push(crc);
         }
 
         // Parse N Offsets
         let mut offsets = Vec::with_capacity(size);
         for _ in 0..size {
-            let off = try!(content.read_u32::<BigEndian>());
+            let off = content.read_u32::<BigEndian>()?;
             offsets.push(off);
         }
 
         // Parse trailer
         let mut pack_sha = [0; 20];
-        try!(content.read_exact(&mut pack_sha));
+        content.read_exact(&mut pack_sha)?;
 
         let mut idx_sha = [0; 20];
-        try!(content.read_exact(&mut idx_sha));
+        content.read_exact(&mut idx_sha)?;
 
         assert_eq!(idx_sha.to_hex(), checksum);
 
@@ -137,25 +137,25 @@ impl PackIndex {
         let total_size = (2 * 4) + 256 * 4 + size * 28;
         let mut buf: Vec<u8> = Vec::with_capacity(total_size);
 
-        try!(buf.write_all(&MAGIC[..]));
-        try!(buf.write_u32::<BigEndian>(VERSION));
+        buf.write_all(&MAGIC[..])?;
+        buf.write_u32::<BigEndian>(VERSION)?;
 
         for f in &self.fanout[..] {
-            try!(buf.write_u32::<BigEndian>(*f));
+            buf.write_u32::<BigEndian>(*f)?;
         }
         for sha in &self.shas {
-            try!(buf.write_all(sha));
+            buf.write_all(sha)?;
         }
         for f in &self.checksums {
-            try!(buf.write_u32::<BigEndian>(*f));
+            buf.write_u32::<BigEndian>(*f)?;
         }
         for f in &self.offsets {
-            try!(buf.write_u32::<BigEndian>(*f));
+            buf.write_u32::<BigEndian>(*f)?;
         }
 
-        try!(buf.write_all(&self.pack_sha.from_hex().unwrap()));
+        buf.write_all(&self.pack_sha.from_hex().unwrap())?;
         let checksum = store::sha1_hash(&buf[..]);
-        try!(buf.write_all(&checksum));
+        buf.write_all(&checksum)?;
 
         Ok(buf)
     }

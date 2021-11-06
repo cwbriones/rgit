@@ -121,7 +121,7 @@ fn receive<R: Read>(reader: &mut R) -> io::Result<Vec<String>> {
 pub fn receive_with_sideband<R: Read>(reader: &mut R) -> io::Result<Vec<u8>> {
     let mut packfile_data = Vec::new();
     loop {
-        match try!(read_packet_line(reader)) {
+        match read_packet_line(reader)? {
             Some(line) => {
                 if &line[..] == b"NAK\n" {
                     continue;
@@ -157,7 +157,7 @@ fn read_packet_line<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
 
     if length > 4 {
         let mut pkt = vec![0; (length - 4) as usize];
-        try!(reader.read_exact(&mut pkt));
+        reader.read_exact(&mut pkt)?;
         Ok(Some(pkt))
     } else {
         Ok(None)
