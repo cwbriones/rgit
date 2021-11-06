@@ -1,9 +1,8 @@
-extern crate getopts;
 extern crate flate2;
 extern crate crypto;
 extern crate rustc_serialize;
 extern crate byteorder;
-extern crate hyper;
+extern crate reqwest;
 extern crate clap;
 extern crate ssh2;
 extern crate crc;
@@ -38,7 +37,9 @@ macro_rules! subcommand_dispatch {
                     command::$subcommand::execute(params)
                 },
                 )+
-                Some(_) => unreachable!(),
+                Some(s) => {
+                    panic!("somehow this doesn't match?: {}", s)
+                }
                 None => {
                     println!("{}", app_matches.usage());
                     Ok(())
@@ -55,7 +56,7 @@ fn main() {
 
     subcommand_dispatch!(app, result,
         "clone" => clone,
-        "clone_ssh" => clone_ssh,
+        "clone-ssh" => clone_ssh,
         "ls-remote" => ls_remote,
         "ls-remote-ssh" => ls_remote_ssh,
         "log" => log,

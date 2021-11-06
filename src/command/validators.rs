@@ -1,8 +1,8 @@
-use hyper::Url;
+use reqwest::Url;
 use regex::Regex;
 
 pub fn is_url(val: String) -> Result<(), String> {
-    Url::parse(&val)
+    val.parse::<Url>()
         .map(|_| ())
         .map_err(|_| "the given path must be a valid URL.".to_owned())
 }

@@ -9,7 +9,6 @@ use super::GitClient;
 
 pub struct GitSSHClient {
     sess: Session,
-    _stream: TcpStream,
     repo: String
 }
 
@@ -17,7 +16,8 @@ impl GitSSHClient {
     pub fn new(host: &str, repo: &str) -> Self {
         let stream = TcpStream::connect(host).unwrap();
         let mut sess = Session::new().unwrap();
-        sess.handshake(&stream).unwrap();
+        sess.set_tcp_stream(stream);
+        sess.handshake().unwrap();
         {
             let mut agent = sess.agent().unwrap();
             agent.connect().unwrap();
@@ -27,7 +27,6 @@ impl GitSSHClient {
 
         GitSSHClient {
             sess: sess,
-            _stream: stream,
             repo: repo.to_owned(),
         }
     }

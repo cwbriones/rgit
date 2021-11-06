@@ -1,26 +1,39 @@
 use std::io;
 use std::io::Read;
 
-use hyper::Url;
-use hyper::client::{IntoUrl,Client};
+use reqwest::Url;
+use reqwest::IntoUrl;
+use reqwest::blocking::Client;
+use reqwest::redirect;
 
 use super::GitClient;
 use packfile::refs::GitRef;
 
 pub struct GitHttpClient {
     url: Url,
-    client: Client
+    client: Client,
 }
 
-const REF_DISCOVERY_ENDPOINT: &'static str = "/info/refs?service=git-upload-pack";
-const UPLOAD_PACK_ENDPOINT: &'static str = "/git-upload-pack";
+const REF_DISCOVERY_ENDPOINT: &'static str = "info/refs?service=git-upload-pack";
+const UPLOAD_PACK_ENDPOINT: &'static str = "git-upload-pack";
 
 impl GitHttpClient {
-    pub fn new<U: IntoUrl>(u: U) -> Self {
-        let url = u.into_url().unwrap();
+    pub fn new<U>(u: U) -> Self
+        where U: IntoUrl,
+    {
+        let mut url = u.into_url().unwrap();
+        // TODO: I think the initial redirect is consuming the http post body when
+        // the caller specifies a clone with http
+        if let Some("github.com") = url.domain() {
+            url.set_scheme("https").unwrap();
+        }
+        let client = Client::builder()
+            .redirect(redirect::Policy::limited(1))
+            .build()
+            .unwrap();
         GitHttpClient {
-            url: follow_url(url),
-            client: Client::new(),
+            url: url,
+            client: client,
         }
     }
 }
@@ -28,8 +41,12 @@ impl GitHttpClient {
 impl GitClient for GitHttpClient {
 
     fn discover_refs(&mut self) -> io::Result<Vec<GitRef>> {
-        let discovery_url = [self.url.as_str(), REF_DISCOVERY_ENDPOINT].join("");
-        let mut res = self.client.get(&discovery_url).send().unwrap();
+        let mut discovery_url = self.url.join(REF_DISCOVERY_ENDPOINT).unwrap();
+        discovery_url.set_query(Some("service=git-upload-pack"));
+
+        let mut res = self.client.get(discovery_url)
+            .send()
+            .unwrap();
 
         // The server first sends a header to verify the service is correct
         let first = try!(super::read_packet_line(&mut res)).unwrap();
@@ -49,26 +66,13 @@ impl GitClient for GitHttpClient {
     fn fetch_packfile(&mut self, want: &[GitRef]) -> io::Result<Vec<u8>> {
         let capabilities = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
         let body = super::create_negotiation_request(&capabilities, want);
-        let pack_endpoint = [self.url.as_str(), UPLOAD_PACK_ENDPOINT].join("");
+        let pack_endpoint = self.url.join(UPLOAD_PACK_ENDPOINT).unwrap();
 
-        let res = self.client
-            .post(&pack_endpoint)
-            .body(&body)
+        let mut res = self.client.post(pack_endpoint)
+            .body(body)
             .send()
             .unwrap();
 
-        let mut reader = io::BufReader::with_capacity(16 * 1024, res);
-        super::receive_with_sideband(&mut reader)
+        super::receive_with_sideband(&mut res)
     }
-}
-
-///
-/// Follows the given url to what is most likely the actual repository.
-///
-/// Hyper follows redirects by default but we have no way of extracting the actual
-/// url and checking that it is fully qualified, since some services (e.g. GitHub)
-/// don't return a redirect when making a packfile request to the wrong URL.
-///
-fn follow_url(url: Url) -> Url {
-    url
 }

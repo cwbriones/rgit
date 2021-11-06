@@ -1,4 +1,5 @@
 use std::io::Result as IoResult;
+use std::path::Path;
 use clap::{self, Arg, ArgMatches};
 
 use super::{validators, SubCommand};
@@ -8,7 +9,7 @@ use remote::httpclient::GitHttpClient;
 use remote::tcpclient::GitTcpClient;
 use packfile::refs;
 use store::Repo;
-use hyper::Url;
+use reqwest::Url;
 
 pub struct Params {
     repo: String,
@@ -35,19 +36,29 @@ pub fn parse(matches: &ArgMatches) -> Params {
 }
 
 pub fn execute(params: Params) -> IoResult<()> {
-    let (mut client, dir): (Box<GitClient>, _) = match Url::parse(&params.repo) {
-        Ok(url) => {
+    let (mut client, dir): (Box<GitClient>, _) = match params.repo.parse::<Url>() {
+        Ok(uri) => {
             // TODO: There has to be a better way to do this.
             let dir = params.dir.unwrap_or_else(|| {
-                url.path_segments().unwrap()
-                    .last().unwrap()
+                Path::new(uri.path())
+                    .components()
+                    .last()
+                    .unwrap() // path is weird
+                    .as_os_str()
+                    .to_owned()
+                    .into_string()
+                    .unwrap() // path should be unicode
                     .split('.')
-                    .next().unwrap()
+                    .next()
+                    .unwrap() // path doesn't end in .git
                     .to_owned()
             });
             let mut repo = params.repo.to_owned();
             if !repo.ends_with(".git") {
                 repo.push_str(".git");
+            }
+            if !repo.ends_with("/") {
+                repo.push_str("/");
             }
             (Box::new(GitHttpClient::new(&repo)), dir)
         },

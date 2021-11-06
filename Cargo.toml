@@ -5,17 +5,18 @@ version = "0.1.0"
 authors = ["Christian Briones <christian@gmail.com>"]
 
 [dependencies]
-getopts = "0.2.14"
 rust-crypto = "0.2.34"
 rustc-serialize = "0.3.16"
 flate2 = "0.2.13"
 nom = "1.1.0"
-byteorder = "0.4.2"
-hyper = "0.9.12"
-clap = "1.5.5"
-ssh2 = "0.2"
-crc = "1.2.0"
-chrono = "0.2.19"
+# structopt = "0.3.25"
+clap = "2.33.3"
+chrono = "0.4.19"
+byteorder = "1.4.3"
+reqwest = { version = "0.11", features = ["blocking"] }
+ssh2 = "0.9.3"
+# consider crc32-fast
+crc = "2.1.0"
 regex = "0.1.55"
 
 [[bin]]

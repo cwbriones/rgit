@@ -9,4 +9,4 @@ pub mod test_delta;
 
 mod validators;
 
-pub type SubCommand = App<'static, 'static, 'static, 'static, 'static, 'static>;
+pub type SubCommand = App<'static, 'static>;

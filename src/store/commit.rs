@@ -4,9 +4,9 @@ use std::str::{self, FromStr};
 use store::GitObject;
 
 use std::fmt::{self, Display, Formatter};
-use chrono::naive::datetime::NaiveDateTime;
-use chrono::datetime::DateTime;
-use chrono::offset::fixed::FixedOffset;
+use chrono::naive::NaiveDateTime;
+use chrono::DateTime;
+use chrono::offset::FixedOffset;
 
 pub struct Person<'a> {
     name: &'a str,

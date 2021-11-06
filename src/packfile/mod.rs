@@ -5,7 +5,7 @@ pub use self::index::PackIndex;
 
 use rustc_serialize::hex::{FromHex,ToHex};
 use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
-use crc::crc32;
+use crc::Crc;
 
 use std::fs::{self, File};
 use std::path::{Path,PathBuf};
@@ -71,7 +71,8 @@ impl PackObject {
             PackObject::RefDelta(_, ref c) => &c[..],
             PackObject::OfsDelta(_, ref c) => &c[..],
         };
-        crc32::checksum_ieee(content)
+        let mut crc = Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
+        crc.checksum(content)
     }
 }
 
