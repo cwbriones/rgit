@@ -18,9 +18,6 @@ use nom::{
 use std::str::{self, FromStr};
 use std::vec::Vec;
 
-// FIXME: Remove rustc_serialize
-use rustc_serialize::hex::ToHex;
-
 pub struct Tree {
     pub entries: Vec<TreeEntry>
 }
@@ -29,7 +26,7 @@ pub struct Tree {
 pub struct TreeEntry {
     pub mode: EntryMode,
     pub path: String,
-    pub sha: String
+    pub sha: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +72,7 @@ named!(parse_tree_entry <TreeEntry>,
             TreeEntry {
                 mode: EntryMode::from_str(mode).unwrap(),
                 path: path.to_string(),
-                sha: sha.to_hex()
+                sha: sha.to_owned(),
             }
         }
     )

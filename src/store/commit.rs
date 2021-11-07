@@ -12,6 +12,8 @@ use nom::{
     digit,
     line_ending,
     many0,
+    map,
+    map_impl,
     map_res,
     map_res_impl,
     named,
@@ -27,6 +29,10 @@ use nom::{
 use chrono::naive::NaiveDateTime;
 use chrono::DateTime;
 use chrono::offset::FixedOffset;
+use faster_hex::{
+    hex_decode,
+    hex_string,
+};
 
 use crate::store::GitObject;
 
@@ -37,8 +43,8 @@ pub struct Person<'a> {
 }
 
 pub struct Commit<'a> {
-    pub tree: &'a str,
-    pub parents: Vec<&'a str>,
+    pub tree: Vec<u8>,
+    pub parents: Vec<Vec<u8>>,
     author: Person<'a>,
     #[allow(dead_code)]
     committer: Person<'a>,
@@ -75,7 +81,7 @@ impl<'a> Display for Person<'a> {
 
 impl<'a> Display for Commit<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        writeln!(f, "commit {}", self.raw.sha())?;
+        writeln!(f, "commit {}", hex_string(&self.raw.sha()[..]))?;
         write!(f, "{}", self.author)?;
         for line in self.message.split('\n') {
             write!(f, "\n    {}", line)?;
@@ -131,15 +137,23 @@ named!(pub parse_person<&[u8],Person>,
     )
 );
 
-named!(parse_commit_inner<&[u8], (&str, Vec<&str>, Person, Person, &str)>,
+named!(parse_commit_inner<&[u8], (Vec<u8>, Vec<Vec<u8>>, Person, Person, &str)>,
   chain!(
     tag!("tree ") ~
-    tree: map_res!(take!(40), str::from_utf8) ~
+    tree: map!(take!(40), |hex_sha| {
+        let mut sha = vec![0; 20];
+        hex_decode(hex_sha, &mut sha).expect("sizes should be valid by parsing");
+        sha
+    }) ~
     newline ~
     parents: many0!(
         chain!(
             tag!("parent ") ~
-            parent: map_res!(take!(40), str::from_utf8) ~
+            parent: map!(take!(40), |hex_sha| {
+                let mut sha = vec![0; 20];
+                hex_decode(hex_sha, &mut sha).expect("sizes should be valid by parsing");
+                sha
+            }) ~
             newline ,
             || { parent }
         )
@@ -159,6 +173,7 @@ mod tests {
     use super::*;
     use crate::store::{GitObject, GitObjectType};
     use nom::IResult;
+    use faster_hex::hex_decode;
 
     #[test]
     fn test_person_parsing() {
@@ -172,9 +187,9 @@ mod tests {
 
     #[test]
     fn test_commit_parsing() {
-        let input = b"tree asdf456789012345678901234567890123456789\n\
-            parent parentone012345678901234567890123456789a\n\
-            parent parenttwo012345678901234567890123456789b\n\
+        let input = b"tree abdf456789012345678901234567890123456789\n\
+            parent abcdefaaa012345678901234567890123456789a\n\
+            parent abcdefbbb012345678901234567890123456789a\n\
             author The Author <author@devs.com> 1353116070 +1100\n\
             committer The Committer <commiter@devs.com> 1353116070 +1100\n\
             \n\
@@ -182,10 +197,10 @@ mod tests {
         let input2 = b"tree 9f5829a852fcd8e3381e343b45cb1c9ff33abf56\nauthor Christian Briones <christian@whisper.sh> 1418004896 -0800\ncommitter Christian Briones <christian@whisper.sh> 1418004914 -0800\n\ninit\n";
         let object = GitObject::new(GitObjectType::Commit, (&input[..]).to_owned());
         if let Some(commit) = Commit::from_raw(&object) {
-            assert_eq!(commit.tree, "asdf456789012345678901234567890123456789");
+            assert_eq!(&commit.tree[..], decode_hex_sha(b"abdf456789012345678901234567890123456789"));
             let parents = vec![
-                "parentone012345678901234567890123456789a",
-                "parenttwo012345678901234567890123456789b"
+                decode_hex_sha(b"abcdefaaa012345678901234567890123456789a"),
+                decode_hex_sha(b"abcdefbbb012345678901234567890123456789a"),
             ];
             assert_eq!(commit.parents, parents);
             assert_eq!(commit.message, "Bump version to 1.6");
@@ -195,5 +210,11 @@ mod tests {
 
         let object2 = GitObject::new(GitObjectType::Commit, (&input2[..]).to_owned());
         assert!(Commit::from_raw(&object2).is_some())
+    }
+
+    fn decode_hex_sha(hex: &[u8]) -> [u8; 20] {
+        let mut sha = [0u8; 20];
+        hex_decode(hex, &mut sha).unwrap();
+        sha
     }
 }

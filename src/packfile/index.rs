@@ -23,7 +23,6 @@
 //      2. Read and return
 //
 use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
-use rustc_serialize::hex::{FromHex,ToHex};
 
 use std::io;
 use std::io::{Write,Read};
@@ -48,7 +47,7 @@ pub struct PackIndex {
     offsets: Vec<u32>,
     shas: Vec<Sha>,
     checksums: Vec<u32>,
-    pack_sha: String
+    pack_sha: Vec<u8>,
 }
 
 impl PackIndex {
@@ -71,7 +70,7 @@ impl PackIndex {
 
     #[allow(unused)]
     fn parse(mut content: &[u8]) -> io::Result<Self> {
-        let checksum = store::sha1_hash_hex(&content[..content.len() - 20]);
+        let checksum = store::sha1_hash(&content[..content.len() - 20]);
 
         // Parse header
         let mut magic = [0; 4];
@@ -117,14 +116,14 @@ impl PackIndex {
         let mut idx_sha = [0; 20];
         content.read_exact(&mut idx_sha)?;
 
-        assert_eq!(idx_sha.to_hex(), checksum);
+        assert_eq!(&idx_sha[..], checksum);
 
         Ok(PackIndex{
             fanout,
             offsets,
             shas,
             checksums,
-            pack_sha: pack_sha.to_hex()
+            pack_sha: (&pack_sha[..]).to_owned(),
         })
     }
 
@@ -153,7 +152,7 @@ impl PackIndex {
             buf.write_u32::<BigEndian>(*f)?;
         }
 
-        buf.write_all(&self.pack_sha.from_hex().unwrap())?;
+        buf.write_all(&self.pack_sha)?;
         let checksum = store::sha1_hash(&buf[..]);
         buf.write_all(&checksum)?;
 
@@ -183,7 +182,7 @@ impl PackIndex {
     /// Creates an index from a list of objects and their offsets
     /// into the packfile.
     ///
-    pub fn from_objects(mut objects: Vec<(usize, u32, GitObject)>, pack_sha: &str) -> Self {
+    pub fn from_objects(mut objects: Vec<(usize, u32, GitObject)>, pack_sha: &[u8]) -> Self {
         let size = objects.len();
         let mut fanout = [0u32; 256];
         let mut offsets = vec![0; size];
@@ -197,7 +196,7 @@ impl PackIndex {
 
         for (i, &(offset, crc, ref obj)) in objects.iter().enumerate() {
             let mut sha = [0; 20];
-            let vsha = obj.sha().from_hex().unwrap();
+            let vsha = obj.sha();
             sha.clone_from_slice(&vsha);
 
             // Checksum should be of packed content in the packfile.
@@ -225,18 +224,18 @@ impl PackIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustc_serialize::hex::{FromHex,ToHex};
     use std::fs::File;
     use std::io::Read;
 
-    use packfile::PackFile;
+    use faster_hex::hex_decode;
+    use crate::packfile::PackFile;
 
     static PACK_FILE: &'static str =
         "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.pack";
     static IDX_FILE: &'static str =
         "tests/data/packs/pack-73e0a23f5ebfc74c7ea1940e2843a408ce1789d0.idx";
 
-    static COMMIT: &'static str = "fb6fb3d9b81142566f4b2466857b0302617768de";
+    static COMMIT: &'static [u8] = b"fb6fb3d9b81142566f4b2466857b0302617768de";
 
     #[test]
     fn reading_an_index() {
@@ -261,13 +260,12 @@ mod tests {
             PackIndex::parse(&bytes[..]).unwrap()
         };
 
+        // FIXME: Weird, unnecessary iter/collect
         let test_shas = pack.index.shas
             .iter()
-            .map(|s| s.to_hex())
             .collect::<Vec<_>>();
         let idx_shas = index.shas
             .iter()
-            .map(|s| s.to_hex())
             .collect::<Vec<_>>();
         assert_eq!(idx_shas.len(), test_shas.len());
         assert_eq!(idx_shas, test_shas);
@@ -294,8 +292,13 @@ mod tests {
         let mut file = File::open(IDX_FILE).unwrap();
         file.read_to_end(&mut bytes).unwrap();
         let index = PackIndex::parse(&bytes[..]).unwrap();
-        let sha = COMMIT.from_hex().unwrap();
-        let bad_sha = "abcdefabcdefabcdefabcdefabcdefabcd".from_hex().unwrap();
+
+        let mut sha = [0u8; 20];
+        hex_decode(COMMIT, &mut sha).unwrap();
+
+        let bad_sha_hex = b"abcdefabcdefabcdefabcdefabcdefabcdabcdef";
+        let mut bad_sha = [0u8; 20];
+        hex_decode(bad_sha_hex, &mut bad_sha).unwrap();
 
         assert_eq!(index.find(&sha[..]), Some(458));
         assert_eq!(index.find(&bad_sha), None);

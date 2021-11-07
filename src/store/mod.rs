@@ -15,7 +15,7 @@ use std::iter::FromIterator;
 
 use byteorder::{BigEndian, WriteBytesExt};
 
-use rustc_serialize::hex::FromHex;
+use faster_hex::hex_decode;
 
 use crate::packfile::PackFile;
 
@@ -98,7 +98,7 @@ impl Repo {
         Ok(())
     }
 
-    pub fn walk(&self, sha: &str) -> Option<Tree> {
+    pub fn walk(&self, sha: &[u8]) -> Option<Tree> {
         self.read_object(sha).ok().and_then(|object| {
             match object.obj_type {
                 GitObjectType::Commit => {
@@ -148,7 +148,7 @@ impl Repo {
                         &self.dir,
                         full_path.to_str().unwrap(),
                         mode.clone(),
-                        sha.clone())?;
+                        &sha[..])?;
                     idx.push(idx_entry);
                 },
                 ref e => panic!("Unsupported Entry Mode {:?}", e)
@@ -162,13 +162,13 @@ impl Repo {
         self.read_tree(sha)
     }
 
-    fn read_tree(&self, sha: &str) -> Option<Tree> {
+    fn read_tree(&self, sha: &[u8]) -> Option<Tree> {
         self.read_object(sha).ok().and_then(|obj| {
             obj.as_tree()
         })
     }
 
-    pub fn read_object(&self, sha: &str) -> IoResult<GitObject> {
+    pub fn read_object(&self, sha: &[u8]) -> IoResult<GitObject> {
         // Attempt to read from disk first
         GitObject::open(&self.dir, sha).or_else(|_| {
             // If this isn't there, read from the packfile
@@ -200,11 +200,13 @@ fn is_git_repo<P: AsRef<Path>>(p: &P) -> bool {
 ///
 /// Reads the given ref to a valid SHA.
 ///
-fn resolve_ref(repo: &str, name: &str) -> IoResult<String> {
+fn resolve_ref(repo: &str, name: &str) -> IoResult<Vec<u8>> {
     // Check if the name is already a sha.
     let trimmed = name.trim();
-    if is_sha(trimmed) {
-        Ok(trimmed.to_owned())
+    if is_hex_sha(trimmed) {
+        let mut sha = vec![0; trimmed.len() / 2];
+        hex_decode(trimmed.as_bytes(), &mut sha).unwrap();
+        Ok(sha)
     } else {
         read_sym_ref(repo, trimmed)
     }
@@ -213,7 +215,7 @@ fn resolve_ref(repo: &str, name: &str) -> IoResult<String> {
 ///
 /// Returns true if id is a valid SHA-1 hash.
 ///
-fn is_sha(id: &str) -> bool {
+fn is_hex_sha(id: &str) -> bool {
     id.len() == 40 && id.chars().all(|c| c.is_digit(16))
 }
 
@@ -221,7 +223,7 @@ fn is_sha(id: &str) -> bool {
 ///
 /// Reads the symbolic ref and resolve it to the actual ref it represents.
 ///
-fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
+fn read_sym_ref(repo: &str, name: &str) -> IoResult<Vec<u8>> {
     // Read the symbolic ref directly and parse the actual ref out
     let mut path = PathBuf::new();
     path.push(repo);
@@ -248,7 +250,10 @@ fn read_sym_ref(repo: &str, name: &str) -> IoResult<String> {
             .trim();
         resolve_ref(repo, the_ref)
     } else {
-        Ok(contents.trim().to_owned())
+        let trimmed = contents.trim();
+        let mut sha = vec![0; trimmed.len() / 2];
+        hex_decode(trimmed.as_bytes(), &mut sha).unwrap();
+        Ok(sha)
     }
 }
 
@@ -269,7 +274,7 @@ struct IndexEntry {
 
 // FIXME:
 // This doesn't need to read the file a second time.
-fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: String) -> IoResult<IndexEntry> {
+fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &[u8]) -> IoResult<IndexEntry> {
     let file = File::open(path)?;
     let meta = file.metadata()?;
 
@@ -279,8 +284,6 @@ fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: String) ->
             path.trim_start_matches(root)
                 .trim_start_matches('/')
         );
-    // FIXME: This error is not handled.
-    let decoded_sha = sha.from_hex().unwrap();
 
     Ok(IndexEntry {
         ctime: meta.ctime(),
@@ -291,7 +294,7 @@ fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: String) ->
         uid: meta.uid(),
         gid: meta.gid(),
         size: meta.size() as i64,
-        sha: decoded_sha,
+        sha: sha.to_owned(),
         path: relative_path.to_str().unwrap().to_owned(),
         file_mode,
     })
@@ -415,14 +418,3 @@ pub fn sha1_hash_iter<'a, I: Iterator<Item=&'a [u8]>>(inputs: I) -> Vec<u8> {
     hasher.result(&mut buf);
     buf
 }
-
-pub fn sha1_hash_hex(input: &[u8]) -> String {
-    use crypto::digest::Digest;
-    use crypto::sha1::Sha1;
-
-    let mut hasher = Sha1::new();
-    hasher.input(input);
-
-    hasher.result_str()
-}
-

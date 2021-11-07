@@ -3,9 +3,9 @@ mod index;
 
 pub use self::index::PackIndex;
 
-use rustc_serialize::hex::{FromHex,ToHex};
+use faster_hex::hex_string;
 use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
-use crc::Crc;
+use crc32fast::Hasher as CrcHasher;
 
 use std::fs::{self, File};
 use std::path::Path;
@@ -25,7 +25,7 @@ pub struct PackFile {
     version: u32,
     num_objects: usize,
     encoded_objects: Vec<u8>,
-    sha: String,
+    sha: Vec<u8>,
     // TODO: Fix this since this is only used in a verification test.
     pub index: PackIndex,
 }
@@ -65,8 +65,9 @@ impl PackObject {
             PackObject::RefDelta(_, ref c) => &c[..],
             PackObject::OfsDelta(_, ref c) => &c[..],
         };
-        let crc = Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
-        crc.checksum(content)
+        let mut h = CrcHasher::new();
+        h.update(content);
+        h.finalize()
     }
 }
 
@@ -88,7 +89,7 @@ impl PackFile {
     }
 
     fn parse_with_index(mut contents: &[u8], idx: Option<PackIndex>) -> IoResult<Self> {
-        let sha_computed = store::sha1_hash_hex(&contents[..contents.len() - 20]);
+        let sha_computed = store::sha1_hash(&contents[..contents.len() - 20]);
 
         let magic = contents.read_u32::<BigEndian>()?;
         let version = contents.read_u32::<BigEndian>()?;
@@ -96,7 +97,7 @@ impl PackFile {
 
         if magic == MAGIC_HEADER {
             let contents_len = contents.len();
-            let checksum = &contents[(contents_len - 20)..contents_len].to_hex();
+            let checksum = &contents[(contents_len - 20)..contents_len];
             assert_eq!(checksum, &sha_computed);
 
             // Use slice::split_at
@@ -120,7 +121,7 @@ impl PackFile {
         let mut path = root.to_path_buf();
         path.push("objects/pack");
         fs::create_dir_all(&path)?;
-        path.push(format!("pack-{}", self.sha()));
+        path.push(format!("pack-{}", hex_string(self.sha())));
         path.set_extension("pack");
 
         let mut idx_path = path.clone();
@@ -148,20 +149,20 @@ impl PackFile {
         Ok(encoded)
     }
 
-    pub fn sha(&self) -> &str {
+    pub fn sha(&self) -> &[u8] {
         &self.sha
     }
 
-    pub fn find_by_sha(&self, sha: &str) -> IoResult<Option<GitObject>> {
-        let off = sha.from_hex().ok().and_then(|s| self.index.find(&s));
+    pub fn find_by_sha(&self, sha: &[u8]) -> IoResult<Option<GitObject>> {
+        let off = self.index.find(sha);
         match off {
             Some(offset) => self.find_by_offset(offset),
             None => Ok(None)
         }
     }
 
-    fn find_by_sha_unresolved(&self, sha: &str) -> IoResult<Option<PackObject>> {
-        let off = sha.from_hex().ok().and_then(|s| self.index.find(&s));
+    fn find_by_sha_unresolved(&self, sha: &[u8]) -> IoResult<Option<PackObject>> {
+        let off = self.index.find(sha);
         match off {
             Some(offset) => Ok(Some(self.read_at_offset(offset)?)),
             None => Ok(None)
@@ -197,7 +198,7 @@ impl PackFile {
                 },
                 PackObject::RefDelta(sha, patch) => {
                     patches.push(patch);
-                    next = self.find_by_sha_unresolved(&sha.to_hex())?;
+                    next = self.find_by_sha_unresolved(&sha)?;
                 },
                 _ => unreachable!()
             }
@@ -235,8 +236,8 @@ impl PackFile {
 pub struct Objects<R> {
     reader: ObjectReader<R>,
     remaining: usize,
-    base_objects: HashMap<String, GitObject>,
-    base_offsets: HashMap<usize, String>,
+    base_objects: HashMap<Vec<u8>, GitObject>,
+    base_offsets: HashMap<usize, Vec<u8>>,
     ref_deltas: Vec<(usize, u32, PackObject)>,
     ofs_deltas: Vec<(usize, u32, PackObject)>,
     resolve: bool,
@@ -257,10 +258,9 @@ impl<R> Objects<R> where R: Read {
 
     fn resolve_ref_delta(&mut self) -> Option<(usize, u32, GitObject)> {
         match self.ref_deltas.pop() {
-            Some((offset, checksum, PackObject::RefDelta(base, patch))) => {
+            Some((offset, checksum, PackObject::RefDelta(base_sha, patch))) => {
                 let patched = {
-                    let sha = base.to_hex();
-                    let base_object = self.base_objects.get(&sha).unwrap();
+                    let base_object = self.base_objects.get(&base_sha[..]).unwrap();
                     base_object.patch(&patch)
                 };
                 {
@@ -496,10 +496,12 @@ mod tests {
         "tests/data/packs/pack-79f006bb5e8d079fdbe07e7ce41f97f4db7d341c.pack";
 
     static BASE_OFFSET: usize = 2154;
-    static BASE_SHA: &'static str = "7e690abcc93718dbf26ddea5c6ede644a63a5b34";
+    // Base SHA is "7e690abcc93718dbf26ddea5c6ede644a63a5b34"
+    static BASE_SHA: &'static [u8; 20] = &[126, 105, 10, 188, 201, 55, 24, 219, 242, 109, 222, 165, 198, 237, 230, 68, 166, 58, 91, 52];
     // We need to test reading an object with a non-trivial delta
     // chain (4).
-    static DELTA_SHA: &'static str = "9b104dc31028e46f2f7d0b8a29989ab9a5155d41";
+    // Delta SHA is "7e690abcc93718dbf26ddea5c6ede644a63a5b34"
+    static DELTA_SHA: &'static [u8; 20] = &[155, 16, 77, 195, 16, 40, 228, 111, 47, 125, 11, 138, 41, 152, 154, 185, 165, 21, 93, 65];
     static DELTA_OFFSET: usize = 2461;
     static DELTA_CONTENT: &'static str =
         "This is a test repo, used for testing the capabilities of the rgit tool. \
