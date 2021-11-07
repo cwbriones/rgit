@@ -1,5 +1,4 @@
-use clap::App;
-
+use structopt::StructOpt;
 use std::process;
 
 mod remote;
@@ -8,46 +7,28 @@ mod store;
 mod delta;
 mod command;
 
-macro_rules! subcommand_dispatch {
-    ($application:ident, $result:ident, $($name:expr => $subcommand:ident),+) => {
-        let $result = {
-            let app_matches = $application
-                $(.subcommand(command::$subcommand::spec()))+
-                .get_matches();
-            match app_matches.subcommand_name() {
-                $(
-                Some($name) => {
-                    let params = command::$subcommand::parse(&app_matches
-                        .subcommand_matches($name)
-                        .unwrap());
-                    command::$subcommand::execute(params)
-                },
-                )+
-                Some(s) => {
-                    panic!("somehow this doesn't match?: {}", s)
-                }
-                None => {
-                    println!("{}", app_matches.usage());
-                    Ok(())
-                }
-            }
-        };
-    }
+#[derive(StructOpt)]
+#[structopt(about = "a toy git implementation in rust", version = env!("CARGO_PKG_VERSION"))]
+#[structopt(flatten)]
+enum Git {
+    Clone(command::clone::SubcommandClone),
+    CloneSsh(command::clone_ssh::SubCommandCloneSsh),
+    ListRemote(command::ls_remote::ListRemote),
+    ListRemoteSsh(command::ls_remote_ssh::SubcommandListRemoteSsh),
+    Log(command::log::SubcommandLog),
+    TestDelta(command::test_delta::SubCommandTestDelta),
 }
 
 fn main() {
-    let app = App::new("rgit")
-        .version("0.1.0")
-        .about("A Git implementation in Rust.");
-
-    subcommand_dispatch!(app, result,
-        "clone" => clone,
-        "clone-ssh" => clone_ssh,
-        "ls-remote" => ls_remote,
-        "ls-remote-ssh" => ls_remote_ssh,
-        "log" => log,
-        "test-delta" => test_delta);
-
+    let git = Git::from_args();
+    let result = match git {
+        Git::Clone(c) => c.execute(),
+        Git::CloneSsh(c) => c.execute(),
+        Git::ListRemote(c) => c.execute(),
+        Git::ListRemoteSsh(c) => c.execute(),
+        Git::Log(c) => c.execute(),
+        Git::TestDelta(c) => c.execute(),
+    };
     if let Err(e) = result {
         println!("Error: {}", e);
         process::exit(-1)

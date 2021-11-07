@@ -1,31 +1,21 @@
 use std::io::Result as IoResult;
-use clap::{self, Arg, ArgMatches};
-use super::SubCommand;
+use structopt::StructOpt;
 
 use crate::store::Repo;
 
-pub struct Params<'a> {
-    revision: Option<&'a str>,
+#[derive(StructOpt)]
+#[structopt(name = "log", about = "show commit logs")]
+pub struct SubcommandLog {
+    revision: Option<String>,
 }
 
-pub fn spec() -> SubCommand {
-    clap::SubCommand::with_name("log")
-        .about("Show commit logs")
-        .arg(Arg::with_name("revision"))
-}
-
-pub fn parse<'a>(matches: &'a ArgMatches) -> Params<'a> {
-    let revision = matches.value_of("revision");
-    Params {
-        revision
+impl SubcommandLog {
+    pub fn execute(&self) -> IoResult<()> {
+        let repo = Repo::from_enclosing()?;
+        let rev = self.revision.clone().unwrap_or("HEAD".into());
+        // Refactor this into a commit walker and pass a closure that calls
+        // std::process::Command::new("less") to pipe it
+        repo.log(&rev)?;
+        Ok(())
     }
-}
-
-pub fn execute(params: Params) -> IoResult<()> {
-    let repo = Repo::from_enclosing()?;
-    let rev = params.revision.unwrap_or("HEAD");
-    // Refactor this into a commit walker and pass a closure that calls
-    // std::process::Command::new("less") to pipe it
-    repo.log(rev)?;
-    Ok(())
 }
