@@ -2,7 +2,7 @@ use std::io::Result as IoResult;
 use clap::{self, Arg, ArgMatches};
 use super::SubCommand;
 
-use store::Repo;
+use crate::store::Repo;
 
 pub struct Params<'a> {
     revision: Option<&'a str>,

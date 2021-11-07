@@ -9,10 +9,10 @@ use std::io::{Read,Write};
 use std::path::PathBuf;
 use std::cell::RefCell;
 
-use store;
-use store::commit::Commit;
-use store::tree::Tree;
-use delta;
+use crate::store;
+use crate::store::commit::Commit;
+use crate::store::tree::Tree;
+use crate::delta;
 
 ///
 /// A type of loose object found in the database.

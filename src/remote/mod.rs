@@ -2,7 +2,7 @@ use std::io;
 use std::io::Read;
 use std::str;
 
-use packfile::refs::GitRef;
+use crate::packfile::refs::GitRef;
 
 pub mod tcpclient;
 pub mod httpclient;

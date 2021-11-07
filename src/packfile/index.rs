@@ -31,8 +31,8 @@ use std::io::Result as IoResult;
 use std::fs::File;
 use std::path::Path;
 
-use store;
-use store::GitObject;
+use crate::store;
+use crate::store::GitObject;
 
 type Sha = [u8; 20];
 

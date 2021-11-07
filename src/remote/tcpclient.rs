@@ -2,7 +2,7 @@ use std::io;
 use std::io::Write;
 use std::net::TcpStream;
 
-use packfile::refs::GitRef;
+use crate::packfile::refs::GitRef;
 
 use super::GitClient;
 

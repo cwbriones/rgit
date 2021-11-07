@@ -1,8 +1,8 @@
 [package]
-
 name = "rgit"
 version = "0.1.0"
 authors = ["Christian Briones <christian@gmail.com>"]
+edition = "2021"
 
 [dependencies]
 rust-crypto = "0.2.34"

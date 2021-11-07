@@ -1,17 +1,3 @@
-extern crate flate2;
-extern crate crypto;
-extern crate rustc_serialize;
-extern crate byteorder;
-extern crate reqwest;
-extern crate clap;
-extern crate ssh2;
-extern crate crc;
-extern crate chrono;
-extern crate regex;
-
-#[macro_use]
-extern crate nom;
-
 use clap::App;
 
 use std::process;

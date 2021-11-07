@@ -13,8 +13,8 @@ use std::io::{Read,Write};
 use std::io::Result as IoResult;
 use std::collections::HashMap;
 
-use store;
-use store::{GitObject, GitObjectType};
+use crate::store;
+use crate::store::{GitObject, GitObjectType};
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 static HEADER_LENGTH: usize = 12; // Magic + Len + Version

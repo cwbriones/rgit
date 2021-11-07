@@ -1,7 +1,24 @@
-use nom::{IResult,space};
+use nom::{
+    IResult,
+    call,
+    chain,
+    chaining_parser,
+    many1,
+    map_res,
+    map_res_impl,
+    named,
+    space,
+    take,
+    take_until,
+    take_until_bytes,
+    take_until_and_consume,
+    take_until_and_consume_bytes,
+};
 
 use std::str::{self, FromStr};
 use std::vec::Vec;
+
+// FIXME: Remove rustc_serialize
 use rustc_serialize::hex::ToHex;
 
 pub struct Tree {

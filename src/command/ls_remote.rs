@@ -3,9 +3,9 @@ use clap::{self, Arg, ArgMatches};
 
 use super::{validators, SubCommand};
 
-use remote::GitClient;
-use remote::httpclient::GitHttpClient;
-use packfile::refs::GitRef;
+use crate::remote::GitClient;
+use crate::remote::httpclient::GitHttpClient;
+use crate::packfile::refs::GitRef;
 
 pub struct Params<'a> {
     repo: &'a str,

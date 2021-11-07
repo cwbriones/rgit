@@ -2,7 +2,7 @@ use std::io::Result as IoResult;
 
 use clap::{self, Arg, ArgMatches};
 
-use delta;
+use crate::delta;
 use super::SubCommand;
 
 pub struct Params<'a> {

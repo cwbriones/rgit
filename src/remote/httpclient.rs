@@ -7,7 +7,7 @@ use reqwest::blocking::Client;
 use reqwest::redirect;
 
 use super::GitClient;
-use packfile::refs::GitRef;
+use crate::packfile::refs::GitRef;
 
 pub struct GitHttpClient {
     url: Url,

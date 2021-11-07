@@ -1,12 +1,34 @@
-use nom::{IResult, rest, newline, line_ending, digit, space};
-
 use std::str::{self, FromStr};
-use store::GitObject;
-
 use std::fmt::{self, Display, Formatter};
+
+use nom::{
+    IResult,
+    alt,
+    alt_parser,
+    call,
+    chain,
+    chaining_parser,
+    char,
+    digit,
+    line_ending,
+    many0,
+    map_res,
+    map_res_impl,
+    named,
+    newline,
+    rest,
+    space,
+    tag,
+    tag_bytes,
+    take,
+    take_until_and_consume,
+    take_until_and_consume_bytes,
+};
 use chrono::naive::NaiveDateTime;
 use chrono::DateTime;
 use chrono::offset::FixedOffset;
+
+use crate::store::GitObject;
 
 pub struct Person<'a> {
     name: &'a str,
@@ -135,7 +157,7 @@ named!(parse_commit_inner<&[u8], (&str, Vec<&str>, Person, Person, &str)>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use store::{GitObject, GitObjectType};
+    use crate::store::{GitObject, GitObjectType};
     use nom::IResult;
 
     #[test]

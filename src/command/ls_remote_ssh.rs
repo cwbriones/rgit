@@ -3,9 +3,9 @@ use clap::{self, Arg, ArgMatches};
 
 use super::SubCommand;
 
-use remote::GitClient;
-use remote::sshclient::GitSSHClient;
-use packfile::refs::GitRef;
+use crate::remote::GitClient;
+use crate::remote::sshclient::GitSSHClient;
+use crate::packfile::refs::GitRef;
 
 pub struct Params<'a> {
     host: &'a str,

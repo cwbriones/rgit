@@ -4,7 +4,7 @@ use std::io::Write;
 use std::io::Result as IoResult;
 use std::net::TcpStream;
 
-use packfile::refs::GitRef;
+use crate::packfile::refs::GitRef;
 use super::GitClient;
 
 pub struct GitSSHClient {

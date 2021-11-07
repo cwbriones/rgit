@@ -1,13 +1,12 @@
-
 use std::io::Result as IoResult;
 use clap::{self, Arg, ArgMatches};
 
 use super::SubCommand;
 
-use remote::GitClient;
-use remote::sshclient::GitSSHClient;
-use packfile::refs;
-use store::Repo;
+use crate::remote::GitClient;
+use crate::remote::sshclient::GitSSHClient;
+use crate::packfile::refs;
+use crate::store::Repo;
 
 pub struct Params<'a> {
     host: &'a str,

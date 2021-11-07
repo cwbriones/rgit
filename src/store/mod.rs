@@ -2,8 +2,8 @@ mod commit;
 mod tree;
 mod object;
 
-pub use store::object::Object as GitObject;
-pub use store::object::ObjectType as GitObjectType;
+pub use crate::store::object::Object as GitObject;
+pub use crate::store::object::ObjectType as GitObjectType;
 
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
@@ -17,7 +17,7 @@ use byteorder::{BigEndian, WriteBytesExt};
 
 use rustc_serialize::hex::FromHex;
 
-use packfile::PackFile;
+use crate::packfile::PackFile;
 
 use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
