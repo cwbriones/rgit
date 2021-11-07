@@ -3,7 +3,6 @@ mod index;
 
 pub use self::index::PackIndex;
 
-use faster_hex::hex_string;
 use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
 use crc32fast::Hasher as CrcHasher;
 
@@ -13,8 +12,7 @@ use std::io::{Read,Write};
 use std::io::Result as IoResult;
 use std::collections::HashMap;
 
-use crate::store;
-use crate::store::{GitObject, GitObjectType};
+use crate::store::{GitObject, GitObjectType, Sha};
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 static HEADER_LENGTH: usize = 12; // Magic + Len + Version
@@ -25,7 +23,7 @@ pub struct PackFile {
     version: u32,
     num_objects: usize,
     encoded_objects: Vec<u8>,
-    sha: Vec<u8>,
+    sha: Sha,
     // TODO: Fix this since this is only used in a verification test.
     pub index: PackIndex,
 }
@@ -36,7 +34,7 @@ pub struct PackFile {
 pub enum PackObject {
     Base(GitObject),
     OfsDelta(usize, Vec<u8>),
-    RefDelta([u8; 20], Vec<u8>),
+    RefDelta(Sha, Vec<u8>),
 }
 
 impl PackObject {
@@ -89,7 +87,7 @@ impl PackFile {
     }
 
     fn parse_with_index(mut contents: &[u8], idx: Option<PackIndex>) -> IoResult<Self> {
-        let sha_computed = store::sha1_hash(&contents[..contents.len() - 20]);
+        let sha_computed = Sha::compute_from_bytes(&contents[..contents.len() - 20]);
 
         let magic = contents.read_u32::<BigEndian>()?;
         let version = contents.read_u32::<BigEndian>()?;
@@ -98,7 +96,7 @@ impl PackFile {
         if magic == MAGIC_HEADER {
             let contents_len = contents.len();
             let checksum = &contents[(contents_len - 20)..contents_len];
-            assert_eq!(checksum, &sha_computed);
+            assert_eq!(checksum, sha_computed.as_bytes());
 
             // Use slice::split_at
             contents = &contents[..contents_len - 20];
@@ -121,7 +119,7 @@ impl PackFile {
         let mut path = root.to_path_buf();
         path.push("objects/pack");
         fs::create_dir_all(&path)?;
-        path.push(format!("pack-{}", hex_string(self.sha())));
+        path.push(format!("pack-{}", self.sha().hex()));
         path.set_extension("pack");
 
         let mut idx_path = path.clone();
@@ -144,16 +142,16 @@ impl PackFile {
         encoded.write_u32::<BigEndian>(self.version)?;
         encoded.write_u32::<BigEndian>(self.num_objects as u32)?;
         encoded.write_all(&self.encoded_objects)?;
-        let checksum = store::sha1_hash(&encoded);
-        encoded.write_all(&checksum)?;
+        let checksum = Sha::compute_from_bytes(&encoded);
+        encoded.write_all(checksum.as_bytes())?;
         Ok(encoded)
     }
 
-    pub fn sha(&self) -> &[u8] {
+    pub fn sha(&self) -> &Sha {
         &self.sha
     }
 
-    pub fn find_by_sha(&self, sha: &[u8]) -> IoResult<Option<GitObject>> {
+    pub fn find_by_sha(&self, sha: &Sha) -> IoResult<Option<GitObject>> {
         let off = self.index.find(sha);
         match off {
             Some(offset) => self.find_by_offset(offset),
@@ -161,7 +159,7 @@ impl PackFile {
         }
     }
 
-    fn find_by_sha_unresolved(&self, sha: &[u8]) -> IoResult<Option<PackObject>> {
+    fn find_by_sha_unresolved(&self, sha: &Sha) -> IoResult<Option<PackObject>> {
         let off = self.index.find(sha);
         match off {
             Some(offset) => Ok(Some(self.read_at_offset(offset)?)),
@@ -236,8 +234,8 @@ impl PackFile {
 pub struct Objects<R> {
     reader: ObjectReader<R>,
     remaining: usize,
-    base_objects: HashMap<Vec<u8>, GitObject>,
-    base_offsets: HashMap<usize, Vec<u8>>,
+    base_objects: HashMap<Sha, GitObject>,
+    base_offsets: HashMap<usize, Sha>,
     ref_deltas: Vec<(usize, u32, PackObject)>,
     ofs_deltas: Vec<(usize, u32, PackObject)>,
     resolve: bool,
@@ -260,7 +258,7 @@ impl<R> Objects<R> where R: Read {
         match self.ref_deltas.pop() {
             Some((offset, checksum, PackObject::RefDelta(base_sha, patch))) => {
                 let patched = {
-                    let base_object = self.base_objects.get(&base_sha[..]).unwrap();
+                    let base_object = self.base_objects.get(&base_sha).unwrap();
                     base_object.patch(&patch)
                 };
                 {
@@ -389,8 +387,10 @@ impl<R> ObjectReader<R> where R: Read {
                 Ok(PackObject::OfsDelta(offset, content))
             },
             7 => {
-                let mut base: [u8; 20] = [0; 20];
-                self.read_exact(&mut base)?;
+                let mut base_content: [u8; 20] = [0; 20];
+                self.read_exact(&mut base_content)?;
+                let base = Sha::from_bytes(&base_content[..]).unwrap();
+
                 let content = self.read_object_content(size)?;
                 Ok(PackObject::RefDelta(base, content))
             }
@@ -496,12 +496,10 @@ mod tests {
         "tests/data/packs/pack-79f006bb5e8d079fdbe07e7ce41f97f4db7d341c.pack";
 
     static BASE_OFFSET: usize = 2154;
-    // Base SHA is "7e690abcc93718dbf26ddea5c6ede644a63a5b34"
-    static BASE_SHA: &'static [u8; 20] = &[126, 105, 10, 188, 201, 55, 24, 219, 242, 109, 222, 165, 198, 237, 230, 68, 166, 58, 91, 52];
+    static BASE_SHA: &'static [u8] = b"7e690abcc93718dbf26ddea5c6ede644a63a5b34";
     // We need to test reading an object with a non-trivial delta
     // chain (4).
-    // Delta SHA is "7e690abcc93718dbf26ddea5c6ede644a63a5b34"
-    static DELTA_SHA: &'static [u8; 20] = &[155, 16, 77, 195, 16, 40, 228, 111, 47, 125, 11, 138, 41, 152, 154, 185, 165, 21, 93, 65];
+    static DELTA_SHA: &'static [u8] = b"9b104dc31028e46f2f7d0b8a29989ab9a5155d41";
     static DELTA_OFFSET: usize = 2461;
     static DELTA_CONTENT: &'static str =
         "This is a test repo, used for testing the capabilities of the rgit tool. \
@@ -546,11 +544,11 @@ mod tests {
     fn reading_a_packed_object_by_sha() {
         let pack = read_pack();
         // Read a base object
-        pack.find_by_sha(BASE_SHA)
+        pack.find_by_sha(&Sha::from_hex(BASE_SHA).unwrap())
             .unwrap()
             .unwrap();
         // Read a deltified object
-        pack.find_by_sha(DELTA_SHA)
+        pack.find_by_sha(&Sha::from_hex(DELTA_SHA).unwrap())
             .unwrap()
             .unwrap();
     }
@@ -559,7 +557,7 @@ mod tests {
     fn reading_delta_objects_should_resolve_them_correctly() {
         use std::str;
         let pack = read_pack();
-        let delta = pack.find_by_sha(DELTA_SHA)
+        let delta = pack.find_by_sha(&Sha::from_hex(DELTA_SHA).unwrap())
             .unwrap()
             .unwrap();
         let content = str::from_utf8(&delta.content[..]).unwrap();

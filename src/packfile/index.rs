@@ -30,10 +30,8 @@ use std::io::Result as IoResult;
 use std::fs::File;
 use std::path::Path;
 
-use crate::store;
+use crate::store::Sha;
 use crate::store::GitObject;
-
-type Sha = [u8; 20];
 
 static MAGIC: [u8; 4] = [255, 116, 79, 99];
 static VERSION: u32 = 2;
@@ -47,7 +45,7 @@ pub struct PackIndex {
     offsets: Vec<u32>,
     shas: Vec<Sha>,
     checksums: Vec<u32>,
-    pack_sha: Vec<u8>,
+    pack_sha: Sha,
 }
 
 impl PackIndex {
@@ -70,7 +68,7 @@ impl PackIndex {
 
     #[allow(unused)]
     fn parse(mut content: &[u8]) -> io::Result<Self> {
-        let checksum = store::sha1_hash(&content[..content.len() - 20]);
+        let checksum = Sha::compute_from_bytes(&content[..content.len() - 20]);
 
         // Parse header
         let mut magic = [0; 4];
@@ -92,7 +90,7 @@ impl PackIndex {
         for _ in 0..size {
             let mut sha = [0; 20];
             content.read_exact(&mut sha)?;
-            shas.push(sha);
+            shas.push(Sha::from_bytes(&sha[..]).unwrap());
         }
 
         // Parse N Checksums
@@ -110,20 +108,22 @@ impl PackIndex {
         }
 
         // Parse trailer
-        let mut pack_sha = [0; 20];
-        content.read_exact(&mut pack_sha)?;
+        let mut pack_sha_content = [0; 20];
+        content.read_exact(&mut pack_sha_content)?;
+        let pack_sha = Sha::from_bytes(&pack_sha_content[..]).unwrap();
 
-        let mut idx_sha = [0; 20];
-        content.read_exact(&mut idx_sha)?;
+        let mut idx_sha_content = [0; 20];
+        content.read_exact(&mut idx_sha_content)?;
+        let idx_sha = Sha::from_bytes(&idx_sha_content[..]).unwrap();
 
-        assert_eq!(&idx_sha[..], checksum);
+        assert_eq!(idx_sha, checksum);
 
         Ok(PackIndex{
             fanout,
             offsets,
             shas,
             checksums,
-            pack_sha: (&pack_sha[..]).to_owned(),
+            pack_sha,
         })
     }
 
@@ -143,7 +143,7 @@ impl PackIndex {
             buf.write_u32::<BigEndian>(*f)?;
         }
         for sha in &self.shas {
-            buf.write_all(sha)?;
+            buf.write_all(sha.as_bytes())?;
         }
         for f in &self.checksums {
             buf.write_u32::<BigEndian>(*f)?;
@@ -152,9 +152,9 @@ impl PackIndex {
             buf.write_u32::<BigEndian>(*f)?;
         }
 
-        buf.write_all(&self.pack_sha)?;
-        let checksum = store::sha1_hash(&buf[..]);
-        buf.write_all(&checksum)?;
+        buf.write_all(self.pack_sha.as_bytes())?;
+        let checksum = Sha::compute_from_bytes(&buf[..]);
+        buf.write_all(checksum.as_bytes())?;
 
         Ok(buf)
     }
@@ -163,8 +163,8 @@ impl PackIndex {
     /// Returns the offset in the packfile for the given SHA, if any.
     ///
     #[allow(dead_code)]
-    pub fn find(&self, sha: &[u8]) -> Option<usize> {
-        let fan = sha[0] as usize;
+    pub fn find(&self, sha: &Sha) -> Option<usize> {
+        let fan = sha.as_bytes()[0] as usize;
         let start = if fan > 0 {
             self.fanout[fan - 1] as usize
         } else {
@@ -173,7 +173,7 @@ impl PackIndex {
         let end = self.fanout[fan] as usize;
 
         self.shas[start..end]
-            .binary_search_by(|s| s[..].cmp(sha))
+            .binary_search_by(|s| s.cmp(sha))
             .map(|i| self.offsets[i + start] as usize)
             .ok()
     }
@@ -182,11 +182,11 @@ impl PackIndex {
     /// Creates an index from a list of objects and their offsets
     /// into the packfile.
     ///
-    pub fn from_objects(mut objects: Vec<(usize, u32, GitObject)>, pack_sha: &[u8]) -> Self {
+    pub fn from_objects(mut objects: Vec<(usize, u32, GitObject)>, pack_sha: &Sha) -> Self {
         let size = objects.len();
         let mut fanout = [0u32; 256];
         let mut offsets = vec![0; size];
-        let mut shas = vec![[0; 20]; size];
+        let mut shas = Vec::with_capacity(20);
         let mut checksums: Vec<u32> = vec![0; size];
 
         // Sort the objects by SHA
@@ -195,17 +195,15 @@ impl PackIndex {
         });
 
         for (i, &(offset, crc, ref obj)) in objects.iter().enumerate() {
-            let mut sha = [0; 20];
-            let vsha = obj.sha();
-            sha.clone_from_slice(&vsha);
+            let sha = obj.sha();
 
             // Checksum should be of packed content in the packfile.
-            let fanout_start = sha[0] as usize;
+            let fanout_start = sha.as_bytes()[0] as usize;
             // By definition of the fanout table we need to increment every entry >= this sha
             for f in fanout.iter_mut().skip(fanout_start) {
                 *f += 1;
             }
-            shas[i] = sha;
+            shas.push(sha);
             offsets[i] = offset as u32;
             checksums[i] = crc;
         }
@@ -227,7 +225,6 @@ mod tests {
     use std::fs::File;
     use std::io::Read;
 
-    use faster_hex::hex_decode;
     use crate::packfile::PackFile;
 
     static PACK_FILE: &'static str =
@@ -293,14 +290,10 @@ mod tests {
         file.read_to_end(&mut bytes).unwrap();
         let index = PackIndex::parse(&bytes[..]).unwrap();
 
-        let mut sha = [0u8; 20];
-        hex_decode(COMMIT, &mut sha).unwrap();
+        let sha = Sha::from_hex(COMMIT).unwrap();
+        let bad_sha = Sha::from_hex(b"abcdefabcdefabcdefabcdefabcdefabcdabcdef").unwrap();
 
-        let bad_sha_hex = b"abcdefabcdefabcdefabcdefabcdefabcdabcdef";
-        let mut bad_sha = [0u8; 20];
-        hex_decode(bad_sha_hex, &mut bad_sha).unwrap();
-
-        assert_eq!(index.find(&sha[..]), Some(458));
+        assert_eq!(index.find(&sha), Some(458));
         assert_eq!(index.find(&bad_sha), None);
     }
 }

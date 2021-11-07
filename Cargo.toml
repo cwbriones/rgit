@@ -5,7 +5,7 @@ authors = ["Christian Briones <christian@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-rust-crypto = "0.2.34"
+sha-1 = "0.9.8"
 flate2 = "0.2.13"
 nom = "1.1.0"
 structopt = "0.3.25"

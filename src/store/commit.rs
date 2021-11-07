@@ -29,12 +29,9 @@ use nom::{
 use chrono::naive::NaiveDateTime;
 use chrono::DateTime;
 use chrono::offset::FixedOffset;
-use faster_hex::{
-    hex_decode,
-    hex_string,
-};
 
 use crate::store::GitObject;
+use crate::store::Sha;
 
 pub struct Person<'a> {
     name: &'a str,
@@ -43,8 +40,8 @@ pub struct Person<'a> {
 }
 
 pub struct Commit<'a> {
-    pub tree: Vec<u8>,
-    pub parents: Vec<Vec<u8>>,
+    pub tree: Sha,
+    pub parents: Vec<Sha>,
     author: Person<'a>,
     #[allow(dead_code)]
     committer: Person<'a>,
@@ -81,7 +78,7 @@ impl<'a> Display for Person<'a> {
 
 impl<'a> Display for Commit<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        writeln!(f, "commit {}", hex_string(&self.raw.sha()[..]))?;
+        writeln!(f, "commit {}", self.raw.sha().hex())?;
         write!(f, "{}", self.author)?;
         for line in self.message.split('\n') {
             write!(f, "\n    {}", line)?;
@@ -137,22 +134,20 @@ named!(pub parse_person<&[u8],Person>,
     )
 );
 
-named!(parse_commit_inner<&[u8], (Vec<u8>, Vec<Vec<u8>>, Person, Person, &str)>,
+named!(parse_commit_inner<&[u8], (Sha, Vec<Sha>, Person, Person, &str)>,
   chain!(
     tag!("tree ") ~
     tree: map!(take!(40), |hex_sha| {
-        let mut sha = vec![0; 20];
-        hex_decode(hex_sha, &mut sha).expect("sizes should be valid by parsing");
-        sha
+        // FIXME: This and parent below can use unchecked by
+        // making the parser hex-aware
+        Sha::from_hex(hex_sha).unwrap()
     }) ~
     newline ~
     parents: many0!(
         chain!(
             tag!("parent ") ~
             parent: map!(take!(40), |hex_sha| {
-                let mut sha = vec![0; 20];
-                hex_decode(hex_sha, &mut sha).expect("sizes should be valid by parsing");
-                sha
+                Sha::from_hex(hex_sha).unwrap()
             }) ~
             newline ,
             || { parent }
@@ -173,7 +168,7 @@ mod tests {
     use super::*;
     use crate::store::{GitObject, GitObjectType};
     use nom::IResult;
-    use faster_hex::hex_decode;
+    
 
     #[test]
     fn test_person_parsing() {
@@ -197,10 +192,10 @@ mod tests {
         let input2 = b"tree 9f5829a852fcd8e3381e343b45cb1c9ff33abf56\nauthor Christian Briones <christian@whisper.sh> 1418004896 -0800\ncommitter Christian Briones <christian@whisper.sh> 1418004914 -0800\n\ninit\n";
         let object = GitObject::new(GitObjectType::Commit, (&input[..]).to_owned());
         if let Some(commit) = Commit::from_raw(&object) {
-            assert_eq!(&commit.tree[..], decode_hex_sha(b"abdf456789012345678901234567890123456789"));
+            assert_eq!(commit.tree, Sha::from_hex(b"abdf456789012345678901234567890123456789").unwrap());
             let parents = vec![
-                decode_hex_sha(b"abcdefaaa012345678901234567890123456789a"),
-                decode_hex_sha(b"abcdefbbb012345678901234567890123456789a"),
+                Sha::from_hex(b"abcdefaaa012345678901234567890123456789a").unwrap(),
+                Sha::from_hex(b"abcdefbbb012345678901234567890123456789a").unwrap(),
             ];
             assert_eq!(commit.parents, parents);
             assert_eq!(commit.message, "Bump version to 1.6");
@@ -210,11 +205,5 @@ mod tests {
 
         let object2 = GitObject::new(GitObjectType::Commit, (&input2[..]).to_owned());
         assert!(Commit::from_raw(&object2).is_some())
-    }
-
-    fn decode_hex_sha(hex: &[u8]) -> [u8; 20] {
-        let mut sha = [0u8; 20];
-        hex_decode(hex, &mut sha).unwrap();
-        sha
     }
 }

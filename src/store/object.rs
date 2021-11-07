@@ -1,4 +1,3 @@
-use faster_hex::hex_string;
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
@@ -10,7 +9,7 @@ use std::io::{Read,Write};
 use std::path::PathBuf;
 use std::cell::RefCell;
 
-use crate::store;
+use crate::store::Sha;
 use crate::store::commit::Commit;
 use crate::store::tree::Tree;
 use crate::delta;
@@ -33,7 +32,7 @@ pub enum ObjectType {
 pub struct Object {
     pub obj_type: ObjectType,
     pub content: Vec<u8>,
-    sha: RefCell<Option<Vec<u8>>>
+    sha: RefCell<Option<Sha>>
 }
 
 impl Object {
@@ -56,16 +55,16 @@ impl Object {
     ///
     /// Opens the given object from loose form in the repo.
     ///
-    pub fn open(repo: &str, sha1: &[u8]) -> IoResult<Self> {
-        let path = object_path(repo, &sha1[..]);
+    pub fn open(repo: &str, sha: &Sha) -> IoResult<Self> {
+        let path = object_path(repo, sha);
 
         let mut inflated = Vec::new();
         let file = File::open(path)?;
         let mut z = ZlibDecoder::new(file);
         z.read_to_end(&mut inflated).expect("Error inflating object");
 
-        let sha1_checksum = store::sha1_hash(&inflated);
-        assert_eq!(sha1_checksum, &sha1[..]);
+        let sha1_checksum = Sha::compute_from_bytes(&inflated);
+        assert_eq!(&sha1_checksum, sha);
 
         let split_idx = inflated.iter().position(|x| *x == 0).unwrap();
         let (obj_type, size) = {
@@ -81,7 +80,7 @@ impl Object {
         Ok(Object {
             obj_type,
             content: footer,
-            sha: RefCell::new(Some(sha1.to_owned()))
+            sha: RefCell::new(Some(sha.clone())),
         })
     }
 
@@ -89,19 +88,18 @@ impl Object {
     /// Encodes the object into packed format, returning the
     /// SHA and encoded representation.
     ///
-    // FIXME: Use a newtype
-    pub fn encode(&self) -> (Vec<u8>, Vec<u8>) {
+    pub fn encode(&self) -> (Sha, Vec<u8>) {
         // encoding:
         // header ++ content
         let mut encoded = self.header();
         encoded.extend_from_slice(&self.content);
-        (store::sha1_hash(&encoded[..]), encoded)
+        (Sha::compute_from_bytes(&encoded[..]), encoded)
     }
 
     ///
     /// Returns the SHA-1 hash of this object's encoded representation.
     ///
-    pub fn sha(&self) -> Vec<u8> {
+    pub fn sha(&self) -> Sha {
         {
             let mut cache = self.sha.borrow_mut();
             if cache.is_some() {
@@ -118,8 +116,8 @@ impl Object {
     ///
     #[allow(unused)]
     pub fn write(&self, repo: &str) -> IoResult<()> {
-        let (sha1, blob) = self.encode();
-        let path = object_path(repo, &sha1[..]);
+        let (sha, blob) = self.encode();
+        let path = object_path(repo, &sha);
 
         fs::create_dir_all(path.parent().unwrap())?;
 
@@ -187,8 +185,8 @@ impl Object {
     }
 }
 
-fn object_path(repo: &str, sha: &[u8]) -> PathBuf {
-    let hex_sha = hex_string(sha);
+fn object_path(repo: &str, sha: &Sha) -> PathBuf {
+    let hex_sha = sha.hex();
 
     let mut path = PathBuf::new();
     path.push(repo);

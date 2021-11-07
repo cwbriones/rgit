@@ -15,14 +15,89 @@ use std::iter::FromIterator;
 
 use byteorder::{BigEndian, WriteBytesExt};
 
-use faster_hex::hex_decode;
-
 use crate::packfile::PackFile;
 
 use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
 
 use std::env;
+
+#[derive(Debug, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
+pub struct Sha {
+    contents: [u8; 20],
+}
+
+#[derive(Debug, Clone)]
+pub enum DecodeShaError {
+    InvalidChar,
+    InvalidLength(usize),
+}
+
+impl std::error::Error for DecodeShaError {
+}
+
+impl std::fmt::Display for DecodeShaError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            DecodeShaError::InvalidChar => write!(f, "invalid char"),
+            DecodeShaError::InvalidLength(l) => write!(f, "invalid length: {}", l),
+        }
+    }
+}
+
+impl From<faster_hex::Error> for DecodeShaError {
+    fn from(error: faster_hex::Error) -> Self {
+        match error {
+            faster_hex::Error::InvalidChar => DecodeShaError::InvalidChar,
+            faster_hex::Error::InvalidLength(u) => DecodeShaError::InvalidLength(u),
+        }
+    }
+}
+
+impl Sha {
+    pub fn from_hex(hex: &[u8]) -> Result<Self, DecodeShaError> {
+        use faster_hex::hex_decode;
+
+        let mut contents = [0u8; 20];
+        if hex.len() != 40 {
+            return Err(DecodeShaError::InvalidLength(hex.len()))
+        }
+        hex_decode(hex, &mut contents)?;
+        Ok(Self {
+            contents,
+        })
+    }
+
+    pub fn compute_from_bytes(bytes: &[u8]) -> Self {
+        use sha1::{
+            Sha1,
+            Digest,
+        };
+
+        let contents: [u8; 20] = Sha1::digest(bytes).into();
+
+        Self { contents }
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeShaError> {
+        if bytes.len() != 20 {
+            return Err(DecodeShaError::InvalidLength(bytes.len()))
+        }
+        let mut contents = [0u8; 20];
+        contents.copy_from_slice(bytes);
+        Ok(Self {
+            contents,
+        })
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.contents[..]
+    }
+
+    pub fn hex(&self) -> String {
+        faster_hex::hex_string(&self.contents[..])
+    }
+}
 
 pub struct Repo {
     dir: String,
@@ -98,7 +173,7 @@ impl Repo {
         Ok(())
     }
 
-    pub fn walk(&self, sha: &[u8]) -> Option<Tree> {
+    pub fn walk(&self, sha: &Sha) -> Option<Tree> {
         self.read_object(sha).ok().and_then(|object| {
             match object.obj_type {
                 GitObjectType::Commit => {
@@ -148,7 +223,7 @@ impl Repo {
                         &self.dir,
                         full_path.to_str().unwrap(),
                         mode.clone(),
-                        &sha[..])?;
+                        sha)?;
                     idx.push(idx_entry);
                 },
                 ref e => panic!("Unsupported Entry Mode {:?}", e)
@@ -162,13 +237,13 @@ impl Repo {
         self.read_tree(sha)
     }
 
-    fn read_tree(&self, sha: &[u8]) -> Option<Tree> {
+    fn read_tree(&self, sha: &Sha) -> Option<Tree> {
         self.read_object(sha).ok().and_then(|obj| {
             obj.as_tree()
         })
     }
 
-    pub fn read_object(&self, sha: &[u8]) -> IoResult<GitObject> {
+    pub fn read_object(&self, sha: &Sha) -> IoResult<GitObject> {
         // Attempt to read from disk first
         GitObject::open(&self.dir, sha).or_else(|_| {
             // If this isn't there, read from the packfile
@@ -200,13 +275,11 @@ fn is_git_repo<P: AsRef<Path>>(p: &P) -> bool {
 ///
 /// Reads the given ref to a valid SHA.
 ///
-fn resolve_ref(repo: &str, name: &str) -> IoResult<Vec<u8>> {
+fn resolve_ref(repo: &str, name: &str) -> IoResult<Sha> {
     // Check if the name is already a sha.
     let trimmed = name.trim();
     if is_hex_sha(trimmed) {
-        let mut sha = vec![0; trimmed.len() / 2];
-        hex_decode(trimmed.as_bytes(), &mut sha).unwrap();
-        Ok(sha)
+        Ok(Sha::from_hex(trimmed.as_bytes()).unwrap())
     } else {
         read_sym_ref(repo, trimmed)
     }
@@ -223,7 +296,7 @@ fn is_hex_sha(id: &str) -> bool {
 ///
 /// Reads the symbolic ref and resolve it to the actual ref it represents.
 ///
-fn read_sym_ref(repo: &str, name: &str) -> IoResult<Vec<u8>> {
+fn read_sym_ref(repo: &str, name: &str) -> IoResult<Sha> {
     // Read the symbolic ref directly and parse the actual ref out
     let mut path = PathBuf::new();
     path.push(repo);
@@ -251,8 +324,7 @@ fn read_sym_ref(repo: &str, name: &str) -> IoResult<Vec<u8>> {
         resolve_ref(repo, the_ref)
     } else {
         let trimmed = contents.trim();
-        let mut sha = vec![0; trimmed.len() / 2];
-        hex_decode(trimmed.as_bytes(), &mut sha).unwrap();
+        let sha = Sha::from_hex(trimmed.as_bytes()).unwrap();
         Ok(sha)
     }
 }
@@ -267,14 +339,14 @@ struct IndexEntry {
     uid: u32,
     gid: u32,
     size: i64,
-    sha: Vec<u8>,
+    sha: Sha,
     file_mode: EntryMode,
     path: String
 }
 
 // FIXME:
 // This doesn't need to read the file a second time.
-fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &[u8]) -> IoResult<IndexEntry> {
+fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> IoResult<IndexEntry> {
     let file = File::open(path)?;
     let meta = file.metadata()?;
 
@@ -294,7 +366,7 @@ fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &[u8]) -> 
         uid: meta.uid(),
         gid: meta.gid(),
         size: meta.size() as i64,
-        sha: sha.to_owned(),
+        sha: sha.clone(),
         path: relative_path.to_str().unwrap().to_owned(),
         file_mode,
     })
@@ -320,8 +392,8 @@ fn encode_index(idx: &mut [IndexEntry]) -> IoResult<Vec<u8>> {
         .collect::<Result<Vec<_>, _>>()?;
     let mut encoded_entries = entries.concat();
     encoded.append(&mut encoded_entries);
-    let mut hash = sha1_hash(&encoded);
-    encoded.append(&mut hash);
+    let sha = Sha::compute_from_bytes(&encoded);
+    encoded.extend_from_slice(sha.as_bytes());
     Ok(encoded)
 }
 
@@ -363,7 +435,7 @@ fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
         let padding_size = 8 - ((v.len() - 2) % 8);
         let padding = vec![0u8; padding_size];
         if padding_size != 8 {
-            v.extend(padding);
+            v.extend_from_slice(&padding[..]);
         }
         v
     };
@@ -378,7 +450,7 @@ fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
     buf.write_u32::<BigEndian>(uid as u32)?;
     buf.write_u32::<BigEndian>(gid as u32)?;
     buf.write_u32::<BigEndian>(size as u32)?;
-    buf.extend_from_slice(sha);
+    buf.extend_from_slice(sha.as_bytes());
     buf.write_u16::<BigEndian>(flags)?;
     buf.extend(path_and_padding);
     Ok(buf)
@@ -392,29 +464,4 @@ fn index_header(num_entries: usize) -> IoResult<Vec<u8>> {
     header.write_u32::<BigEndian>(version)?;
     header.write_u32::<BigEndian>(num_entries as u32)?;
     Ok(header)
-}
-
-pub fn sha1_hash(input: &[u8]) -> Vec<u8> {
-    use crypto::digest::Digest;
-    use crypto::sha1::Sha1;
-
-    let mut hasher = Sha1::new();
-    hasher.input(input);
-    let mut buf = vec![0; hasher.output_bytes()];
-    hasher.result(&mut buf);
-    buf
-}
-
-#[allow(dead_code)]
-pub fn sha1_hash_iter<'a, I: Iterator<Item=&'a [u8]>>(inputs: I) -> Vec<u8> {
-    use crypto::digest::Digest;
-    use crypto::sha1::Sha1;
-
-    let mut hasher = Sha1::new();
-    for input in inputs {
-        hasher.input(input);
-    }
-    let mut buf = vec![0; hasher.output_bytes()];
-    hasher.result(&mut buf);
-    buf
 }

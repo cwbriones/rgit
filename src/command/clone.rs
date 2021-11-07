@@ -49,7 +49,7 @@ impl SubcommandClone {
             },
             Err(_) => {
                 let client = GitTcpClient::connect(&self.repo, "127.0.0.1", 9418)?;
-                let dir = self.dir.clone().unwrap_or(self.repo.clone());
+                let dir = self.dir.clone().unwrap_or_else(|| self.repo.clone());
                 (Box::new(client), dir)
             }
         };

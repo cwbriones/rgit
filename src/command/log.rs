@@ -12,7 +12,7 @@ pub struct SubcommandLog {
 impl SubcommandLog {
     pub fn execute(&self) -> IoResult<()> {
         let repo = Repo::from_enclosing()?;
-        let rev = self.revision.clone().unwrap_or("HEAD".into());
+        let rev = self.revision.clone().unwrap_or_else(|| "HEAD".into());
         // Refactor this into a commit walker and pass a closure that calls
         // std::process::Command::new("less") to pipe it
         repo.log(&rev)?;
