@@ -1,22 +1,13 @@
-use nom::{
-    IResult,
-    call,
-    chain,
-    chaining_parser,
-    many1,
-    map_res,
-    map_res_impl,
-    named,
-    space,
-    take,
-    take_until,
-    take_until_bytes,
-    take_until_and_consume,
-    take_until_and_consume_bytes,
-};
-
-use std::str::{self, FromStr};
+use std::str;
 use std::vec::Vec;
+
+use nom::multi;
+use nom::sequence as seq;
+use nom::bytes::complete as bytes;
+use nom::combinator::{
+    map,
+    map_res,
+};
 
 use crate::store::Sha;
 
@@ -43,7 +34,7 @@ pub enum EntryMode {
 
 impl Tree {
     pub fn parse(content: &[u8]) -> Option<Self> {
-        if let IResult::Done(_, entries) = parse_tree_entries(content) {
+        if let Ok((_, entries)) = parse_tree(content) {
             Some(Tree { entries } )
         } else {
             None
@@ -51,37 +42,68 @@ impl Tree {
     }
 }
 
-impl FromStr for EntryMode {
-    type Err = u8;
-    fn from_str(mode: &str) -> Result<Self, Self::Err> {
+#[derive(Debug)]
+pub struct UnsupportedFileMode;
+
+impl TryFrom<&[u8]> for EntryMode {
+    type Error = UnsupportedFileMode;
+
+    fn try_from(mode: &[u8]) -> Result<Self, Self::Error> {
         match mode {
-            "100644" | "644" => Ok(EntryMode::Normal),
-            "100755" | "755" => Ok(EntryMode::Executable),
-            "120000" => Ok(EntryMode::Symlink),
-            "160000" => Ok(EntryMode::Gitlink),
-            "40000" => Ok(EntryMode::SubDirectory),
-            _ => panic!("Unsupported file mode: {}", mode)
+            b"100644" | b"644" => Ok(EntryMode::Normal),
+            b"100755" | b"755" => Ok(EntryMode::Executable),
+            b"120000" => Ok(EntryMode::Symlink),
+            b"160000" => Ok(EntryMode::Gitlink),
+            b"40000" => Ok(EntryMode::SubDirectory),
+            _ => Err(UnsupportedFileMode),
         }
     }
 }
 
-named!(parse_tree_entry <TreeEntry>,
-    chain!(
-        mode: map_res!(take_until!(" "), str::from_utf8) ~
-        space ~
-        path: map_res!(take_until_and_consume!("\0"), str::from_utf8) ~
-        sha: take!(20),
-        || {
-            TreeEntry {
-                mode: EntryMode::from_str(mode).unwrap(),
-                path: path.to_string(),
-                sha: Sha::from_bytes(sha).unwrap(),
-            }
-        }
-    )
-);
+fn parse_tree(input: &[u8]) -> nom::IResult<&[u8], Vec<TreeEntry>> {
+    multi::many1(parse_tree_entry)(input)
+}
 
-named!(parse_tree_entries <Vec<TreeEntry> >, many1!(parse_tree_entry));
+fn take_until_and_consume<T, I, E>(tag: T) -> impl Fn(I) -> nom::IResult<I, I, E>
+where
+    E: nom::error::ParseError<I>,
+    I: nom::InputTake
+        + nom::FindSubstring<T>
+        + nom::Slice<std::ops::RangeFrom<usize>>
+        + nom::InputIter<Item = u8>
+        + nom::InputLength,
+    T: nom::InputLength + Clone,
+{
+    use nom::bytes::complete::take;
+    use nom::bytes::complete::take_until;
+    use nom::sequence::terminated;
+
+    move |input| terminated(take_until(tag.clone()), take(tag.input_len()))(input)
+}
+
+fn parse_tree_entry(input: &[u8]) -> nom::IResult<&[u8], TreeEntry> {
+    let parts = seq::tuple((
+        map_res(
+            take_until_and_consume(" "),
+            EntryMode::try_from,
+        ),
+        map_res(
+            take_until_and_consume("\0"),
+            str::from_utf8,
+        ),
+        map_res(
+            bytes::take(20usize),
+            Sha::from_bytes,
+        ),
+    ));
+    map(parts, |(mode, path, sha)| {
+        TreeEntry {
+            mode,
+            path: path.to_string(),
+            sha,
+        }
+    })(input)
+}
 
 #[test]
 fn test_parse_tree() {
@@ -93,9 +115,9 @@ fn test_parse_tree() {
         32, 82, 69, 65, 68, 77, 69, 46, 109, 100, 0, 189, 6, 31, 50, 207, 237, 81, 181, 168, 222, 145,
         109, 134, 186, 137, 235, 159, 208, 104, 242, 52, 48, 48, 48, 48, 32, 115, 114, 99, 0, 44, 153,
         32, 248, 175, 44, 114, 130, 179, 183, 191, 144, 34, 196, 7, 92, 15, 177, 105, 86];
-    if let IResult::Done(_, _) = parse_tree_entries(&input) {
-        ()
-    } else {
-        panic!("Failed to parse tree");
+    println!("{:?}", String::from_utf8_lossy(&input));
+    match parse_tree(&input) {
+        Ok(_) => {},
+        Err(e) => panic!("Failed to parse tree: {}", e),
     }
 }
