@@ -5,22 +5,22 @@ mod object;
 pub use crate::store::object::Object as GitObject;
 pub use crate::store::object::ObjectType as GitObjectType;
 
+use std::env;
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
-use std::io::{Read,Write};
-use std::io::Result as IoResult;
+use std::io::{self, Read,Write};
 use std::path::{Path,PathBuf};
 use std::os::unix::fs::MetadataExt;
 use std::iter::FromIterator;
 
+use anyhow::Context;
+use anyhow::Result;
 use byteorder::{BigEndian, WriteBytesExt};
 
 use crate::packfile::PackFile;
 
 use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
-
-use std::env;
 
 #[derive(Debug, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Sha {
@@ -109,7 +109,7 @@ impl Repo {
     /// Recursively searches for and loads a repository from the enclosing
     /// directories.
     ///
-    pub fn from_enclosing() -> IoResult<Self> {
+    pub fn from_enclosing() -> Result<Self> {
         // Navigate upwards until we are in the repo
         let mut dir = env::current_dir()?;
         while !is_git_repo(&dir) {
@@ -121,9 +121,10 @@ impl Repo {
         p.push("objects");
         p.push("pack");
 
+        // FIXME: This whole method is nonsense
         let pack_path = if p.exists() {
             let mut the_path = String::new();
-            for dir_entry in fs::read_dir(p)? {
+            for dir_entry in fs::read_dir(&p)? {
                 let d = dir_entry.unwrap();
                 let fname = d.file_name();
                 let s = fname.to_str().unwrap();
@@ -136,9 +137,15 @@ impl Repo {
         } else {
             None
         };
-
-        let pack = pack_path.map(|p| {
-            PackFile::open(p).unwrap()
+        let pack = pack_path.map(|filename| {
+            let mut fullpath = p.clone();
+            fullpath.push(filename);
+            fullpath
+        }).map(|p| {
+            let pctx = p.clone();
+            PackFile::open(p)
+                .with_context(|| format!("packfile {:?}", pctx))
+                .unwrap()
         });
 
         Ok(Repo {
@@ -147,7 +154,7 @@ impl Repo {
         })
     }
 
-    pub fn from_packfile(dir: &str, packfile_data: &[u8]) -> IoResult<Self> {
+    pub fn from_packfile(dir: &str, packfile_data: &[u8]) -> Result<Self> {
         let packfile = PackFile::parse(packfile_data)?;
         let mut root = PathBuf::new();
         root.push(dir);
@@ -164,7 +171,7 @@ impl Repo {
     /// Resolves the head SHA and attempts to create the file structure
     /// of the repository.
     ///
-    pub fn checkout_head(&self) -> IoResult<()> {
+    pub fn checkout_head(&self) -> Result<()> {
         let tip = resolve_ref(&self.dir, "HEAD")?;
         let mut idx = Vec::new();
         // FIXME: This should also "bubble up" errors, walk needs to return a result.
@@ -187,7 +194,7 @@ impl Repo {
         })
     }
 
-    fn walk_tree(&self, parent: &str, tree: &Tree, idx: &mut Vec<IndexEntry>) -> IoResult<()> {
+    fn walk_tree(&self, parent: &str, tree: &Tree, idx: &mut Vec<IndexEntry>) -> Result<()> {
         for entry in &tree.entries {
             let &TreeEntry {
                 ref path,
@@ -243,7 +250,7 @@ impl Repo {
         })
     }
 
-    pub fn read_object(&self, sha: &Sha) -> IoResult<GitObject> {
+    pub fn read_object(&self, sha: &Sha) -> Result<GitObject> {
         // Attempt to read from disk first
         GitObject::open(&self.dir, sha).or_else(|_| {
             // If this isn't there, read from the packfile
@@ -252,7 +259,7 @@ impl Repo {
         })
     }
 
-    pub fn log(&self, rev: &str) -> IoResult<()> {
+    pub fn log(&self, rev: &str) -> Result<()> {
         let mut sha = resolve_ref(&self.dir, rev)?;
         loop {
             let object = self.read_object(&sha)?;
@@ -275,7 +282,7 @@ fn is_git_repo<P: AsRef<Path>>(p: &P) -> bool {
 ///
 /// Reads the given ref to a valid SHA.
 ///
-fn resolve_ref(repo: &str, name: &str) -> IoResult<Sha> {
+fn resolve_ref(repo: &str, name: &str) -> Result<Sha> {
     // Check if the name is already a sha.
     let trimmed = name.trim();
     if is_hex_sha(trimmed) {
@@ -296,7 +303,7 @@ fn is_hex_sha(id: &str) -> bool {
 ///
 /// Reads the symbolic ref and resolve it to the actual ref it represents.
 ///
-fn read_sym_ref(repo: &str, name: &str) -> IoResult<Sha> {
+fn read_sym_ref(repo: &str, name: &str) -> Result<Sha> {
     // Read the symbolic ref directly and parse the actual ref out
     let mut path = PathBuf::new();
     path.push(repo);
@@ -346,7 +353,7 @@ struct IndexEntry {
 
 // FIXME:
 // This doesn't need to read the file a second time.
-fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> IoResult<IndexEntry> {
+fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> Result<IndexEntry> {
     let file = File::open(path)?;
     let meta = file.metadata()?;
 
@@ -372,7 +379,7 @@ fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> I
     })
 }
 
-fn write_index(repo: &str, entries: &mut [IndexEntry]) -> IoResult<()> {
+fn write_index(repo: &str, entries: &mut [IndexEntry]) -> Result<()> {
     let mut path = PathBuf::new();
     path.push(repo);
     path.push(".git");
@@ -383,7 +390,7 @@ fn write_index(repo: &str, entries: &mut [IndexEntry]) -> IoResult<()> {
     Ok(())
 }
 
-fn encode_index(idx: &mut [IndexEntry]) -> IoResult<Vec<u8>> {
+fn encode_index(idx: &mut [IndexEntry]) -> Result<Vec<u8>> {
     let mut encoded = index_header(idx.len())?;
     idx.sort_by(|a, b| a.path.cmp(&b.path));
     let entries =
@@ -397,7 +404,7 @@ fn encode_index(idx: &mut [IndexEntry]) -> IoResult<Vec<u8>> {
     Ok(encoded)
 }
 
-fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
+fn encode_entry(entry: &IndexEntry) -> Result<Vec<u8>> {
     let mut buf: Vec<u8> = Vec::with_capacity(62);
     let &IndexEntry {
         ctime,
@@ -456,7 +463,7 @@ fn encode_entry(entry: &IndexEntry) -> IoResult<Vec<u8>> {
     Ok(buf)
 }
 
-fn index_header(num_entries: usize) -> IoResult<Vec<u8>> {
+fn index_header(num_entries: usize) -> io::Result<Vec<u8>> {
     let mut header = Vec::with_capacity(12);
     let magic = 1145655875; // "DIRC"
     let version: u32 = 2;

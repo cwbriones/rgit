@@ -1,4 +1,4 @@
-use std::io::Result as IoResult;
+use anyhow::Result;
 use structopt::StructOpt;
 
 use crate::store::Repo;
@@ -10,7 +10,7 @@ pub struct SubcommandLog {
 }
 
 impl SubcommandLog {
-    pub fn execute(&self) -> IoResult<()> {
+    pub fn execute(&self) -> Result<()> {
         let repo = Repo::from_enclosing()?;
         let rev = self.revision.clone().unwrap_or_else(|| "HEAD".into());
         // Refactor this into a commit walker and pass a closure that calls

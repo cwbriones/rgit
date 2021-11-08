@@ -1,5 +1,4 @@
-use std::io::Result as IoResult;
-
+use anyhow::Result;
 use structopt::StructOpt;
 
 use crate::remote::GitClient;
@@ -17,7 +16,7 @@ pub struct SubCommandCloneSsh {
 
 
 impl SubCommandCloneSsh {
-    pub fn execute(self) -> IoResult<()> {
+    pub fn execute(self) -> Result<()> {
         let dir = self.repo.split('.')
             .next().unwrap();
         let full_repo = [&self.user, "/", &self.repo].join("");

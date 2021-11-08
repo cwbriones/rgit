@@ -1,6 +1,6 @@
-use std::io::Result as IoResult;
 use std::path::Path;
 
+use anyhow::Result;
 use reqwest::Url;
 use structopt::StructOpt;
 
@@ -20,7 +20,7 @@ pub struct SubcommandClone {
 }
 
 impl SubcommandClone {
-    pub fn execute(&self) -> IoResult<()> {
+    pub fn execute(&self) -> Result<()> {
         let (mut client, dir): (Box<dyn GitClient>, _) = match self.repo.parse::<Url>() {
             Ok(uri) => {
                 // TODO: There has to be a better way to do this.

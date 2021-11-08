@@ -1,5 +1,4 @@
-use std::io::Result as IoResult;
-
+use anyhow::Result;
 use structopt::StructOpt;
 
 use crate::remote::GitClient;
@@ -16,13 +15,13 @@ pub struct ListRemote {
 /// Lists remote refs available in the given repo.
 ///
 impl ListRemote {
-    pub fn execute(&self) -> IoResult<()> {
+    pub fn execute(&self) -> Result<()> {
         let mut client = GitHttpClient::new(&self.repo);
-        client.discover_refs().map(|pktlines| {
-            for p in &pktlines {
-                let &GitRef{ref id, ref name} = p;
-                println!("{}\t{}", id, name);
-            }
-        })
+        let pktlines = client.discover_refs()?;
+        for p in &pktlines {
+            let &GitRef{ref id, ref name} = p;
+            println!("{}\t{}", id, name);
+        }
+        Ok(())
     }
 }

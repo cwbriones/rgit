@@ -3,13 +3,16 @@ mod index;
 
 pub use self::index::PackIndex;
 
+use anyhow::{
+    Context,
+    Result,
+};
 use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
 use crc32fast::Hasher as CrcHasher;
 
 use std::fs::{self, File};
 use std::path::Path;
-use std::io::{Read,Write};
-use std::io::Result as IoResult;
+use std::io::{self,Read,Write};
 use std::collections::HashMap;
 
 use crate::store::{GitObject, GitObjectType, Sha};
@@ -70,7 +73,7 @@ impl PackObject {
 }
 
 impl PackFile {
-    pub fn open<P: AsRef<Path>>(p: P) -> IoResult<Self> {
+    pub fn open<P: AsRef<Path>>(p: P) -> Result<Self> {
         let path = p.as_ref();
         let mut contents = Vec::new();
         let mut file = File::open(path)?;
@@ -82,16 +85,16 @@ impl PackFile {
         PackFile::parse_with_index(&contents, idx)
     }
 
-    pub fn parse(contents: &[u8]) -> IoResult<Self> {
+    pub fn parse(contents: &[u8]) -> Result<Self> {
         PackFile::parse_with_index(contents, None)
     }
 
-    fn parse_with_index(mut contents: &[u8], idx: Option<PackIndex>) -> IoResult<Self> {
+    fn parse_with_index(mut contents: &[u8], idx: Option<PackIndex>) -> Result<Self> {
         let sha_computed = Sha::compute_from_bytes(&contents[..contents.len() - 20]);
 
-        let magic = contents.read_u32::<BigEndian>()?;
-        let version = contents.read_u32::<BigEndian>()?;
-        let num_objects = contents.read_u32::<BigEndian>()? as usize;
+        let magic = contents.read_u32::<BigEndian>().context("magic number")?;
+        let version = contents.read_u32::<BigEndian>().context("version")?;
+        let num_objects = contents.read_u32::<BigEndian>().context("num_objects")? as usize;
 
         if magic == MAGIC_HEADER {
             let contents_len = contents.len();
@@ -115,7 +118,7 @@ impl PackFile {
         }
     }
 
-    pub fn write(&self, root: &Path) -> IoResult<()> {
+    pub fn write(&self, root: &Path) -> Result<()> {
         let mut path = root.to_path_buf();
         path.push("objects/pack");
         fs::create_dir_all(&path)?;
@@ -136,7 +139,7 @@ impl PackFile {
         Ok(())
     }
 
-    pub fn encode(&self) -> IoResult<Vec<u8>> {
+    pub fn encode(&self) -> Result<Vec<u8>> {
         let mut encoded = Vec::with_capacity(HEADER_LENGTH + self.encoded_objects.len());
         encoded.write_u32::<BigEndian>(MAGIC_HEADER)?;
         encoded.write_u32::<BigEndian>(self.version)?;
@@ -151,7 +154,7 @@ impl PackFile {
         &self.sha
     }
 
-    pub fn find_by_sha(&self, sha: &Sha) -> IoResult<Option<GitObject>> {
+    pub fn find_by_sha(&self, sha: &Sha) -> Result<Option<GitObject>> {
         let off = self.index.find(sha);
         match off {
             Some(offset) => self.find_by_offset(offset),
@@ -159,7 +162,7 @@ impl PackFile {
         }
     }
 
-    fn find_by_sha_unresolved(&self, sha: &Sha) -> IoResult<Option<PackObject>> {
+    fn find_by_sha_unresolved(&self, sha: &Sha) -> Result<Option<PackObject>> {
         let off = self.index.find(sha);
         match off {
             Some(offset) => Ok(Some(self.read_at_offset(offset)?)),
@@ -167,7 +170,7 @@ impl PackFile {
         }
     }
 
-    fn find_by_offset(&self, mut offset: usize) -> IoResult<Option<GitObject>> {
+    fn find_by_offset(&self, mut offset: usize) -> Result<Option<GitObject>> {
         // Read the initial offset.
         //
         // If it is a base object, return the enclosing object.
@@ -219,7 +222,7 @@ impl PackFile {
         Ok(Some(object.unwrap()))
     }
 
-    fn read_at_offset(&self, offset: usize) -> IoResult<PackObject> {
+    fn read_at_offset(&self, offset: usize) -> Result<PackObject> {
         let total_offset = offset - HEADER_LENGTH;
         let contents = &self.encoded_objects[total_offset..];
         let mut reader = ObjectReader::new(contents);
@@ -353,7 +356,7 @@ impl<R> ObjectReader<R> where R: Read {
         }
     }
 
-    pub fn read_object(&mut self) -> IoResult<PackObject> {
+    pub fn read_object(&mut self) -> Result<PackObject> {
         let mut c = self.read_u8()?;
         let type_id = (c >> 4) & 7;
 
@@ -404,7 +407,7 @@ impl<R> ObjectReader<R> where R: Read {
     // by concatenating the lower 7 bits of each byte, and
     // for n >= 2 adding 2^7 + 2^14 + ... + 2^(7*(n-1))
     // to the result.
-    fn read_offset(&mut self) -> IoResult<usize> {
+    fn read_offset(&mut self) -> io::Result<usize> {
         let mut c = self.read_u8()?;
         let mut offset = (c & 0x7f) as usize;
         while c & 0x80 != 0 {
@@ -420,7 +423,7 @@ impl<R> ObjectReader<R> where R: Read {
         self.consumed_bytes
     }
 
-    fn read_object_content(&mut self, size: usize) -> IoResult<Vec<u8>> {
+    fn read_object_content(&mut self, size: usize) -> io::Result<Vec<u8>> {
         let mut decompressor = Decompress::new(true);
         let mut object_buffer = Vec::with_capacity(size);
 
@@ -448,7 +451,7 @@ impl<R> ObjectReader<R> where R: Read {
         }
     }
 
-    fn fill_buffer(&mut self) -> IoResult<&[u8]> {
+    fn fill_buffer(&mut self) -> io::Result<&[u8]> {
         // If we've reached the end of our internal buffer then we need to fetch
         // some more data from the underlying reader.
         if self.pos == self.cap {
@@ -465,7 +468,7 @@ impl<R> ObjectReader<R> where R: Read {
 }
 
 impl<R: Read> Read for ObjectReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         // If we don't have any buffered data and we're doing a massive read
         // (larger than our internal buffer), bypass our internal buffer
         // entirely.

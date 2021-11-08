@@ -1,5 +1,4 @@
-use std::io::Result as IoResult;
-
+use anyhow::{Context, Result};
 use structopt::StructOpt;
 
 use crate::delta;
@@ -12,7 +11,7 @@ pub struct SubCommandTestDelta {
 }
 
 impl SubCommandTestDelta {
-    pub fn execute(&self) -> IoResult<()> {
-        delta::patch_file(&self.source, &self.delta)
+    pub fn execute(&self) -> Result<()> {
+        delta::patch_file(&self.source, &self.delta).context("patch file")
     }
 }
