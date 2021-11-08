@@ -2,8 +2,8 @@ mod commit;
 mod tree;
 mod object;
 
-pub use crate::store::object::Object as GitObject;
-pub use crate::store::object::ObjectType as GitObjectType;
+pub use crate::store::object::PackedObject;
+pub use crate::store::object::ObjectType;
 
 use std::env;
 use std::fs::{self, File};
@@ -116,34 +116,11 @@ impl Repo {
             assert!(dir.pop(), "Not in a git repo");
         }
 
-        let mut p = dir.clone();
-        p.push(".git");
-        p.push("objects");
-        p.push("pack");
+        let pack_path = Repo::find_packfile(dir.as_path())?;
 
-        // FIXME: This whole method is nonsense
-        let pack_path = if p.exists() {
-            let mut the_path = String::new();
-            for dir_entry in fs::read_dir(&p)? {
-                let d = dir_entry.unwrap();
-                let fname = d.file_name();
-                let s = fname.to_str().unwrap();
-                if s.starts_with("pack") && s.ends_with(".pack") {
-                    the_path = s.to_owned();
-                    break;
-                }
-            }
-            Some(the_path)
-        } else {
-            None
-        };
-        let pack = pack_path.map(|filename| {
-            let mut fullpath = p.clone();
-            fullpath.push(filename);
-            fullpath
-        }).map(|p| {
-            let pctx = p.clone();
-            PackFile::open(p)
+        let pack = pack_path.map(|path| {
+            let pctx = path.clone();
+            PackFile::open(path)
                 .with_context(|| format!("packfile {:?}", pctx))
                 .unwrap()
         });
@@ -152,6 +129,26 @@ impl Repo {
             dir: dir.to_str().unwrap().to_owned(),
             pack,
         })
+    }
+
+    fn find_packfile(dir: &Path) -> Result<Option<PathBuf>> {
+        let mut pack_path = dir.to_owned();
+        pack_path.push(".git");
+        pack_path.push("objects");
+        pack_path.push("pack");
+
+        if pack_path.exists() {
+            for dir_entry in fs::read_dir(&pack_path)? {
+                let dir_entry = dir_entry.unwrap();
+                let fname = dir_entry.file_name();
+                let fname = fname.to_str().unwrap();
+                if fname.starts_with("pack") && fname.ends_with(".pack") {
+                    pack_path.push(fname);
+                    return Ok(Some(pack_path));
+                }
+            }
+        }
+        Ok(None)
     }
 
     pub fn from_packfile(dir: &str, packfile_data: &[u8]) -> Result<Self> {
@@ -183,10 +180,10 @@ impl Repo {
     pub fn walk(&self, sha: &Sha) -> Option<Tree> {
         self.read_object(sha).ok().and_then(|object| {
             match object.obj_type {
-                GitObjectType::Commit => {
+                ObjectType::Commit => {
                     object.as_commit().and_then(|c| self.extract_tree(&c))
                 },
-                GitObjectType::Tree => {
+                ObjectType::Tree => {
                     object.as_tree()
                 },
                 _ => None
@@ -250,9 +247,9 @@ impl Repo {
         })
     }
 
-    pub fn read_object(&self, sha: &Sha) -> Result<GitObject> {
+    pub fn read_object(&self, sha: &Sha) -> Result<PackedObject> {
         // Attempt to read from disk first
-        GitObject::open(&self.dir, sha).or_else(|_| {
+        PackedObject::open(&self.dir, sha).or_else(|_| {
             // If this isn't there, read from the packfile
             let pack = self.pack.as_ref().unwrap();
             pack.find_by_sha(sha).map(|o| o.unwrap())

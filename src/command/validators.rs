@@ -1,21 +1,19 @@
 use reqwest::Url;
 use regex::Regex;
 
-pub fn is_url(val: String) -> Result<(), String> {
-    val.parse::<Url>()
-        .map(|_| ())
-        .map_err(|_| "the given path must be a valid URL.".to_owned())
-}
-
-pub fn is_ssh_repo(val: String) -> Result<(), String> {
-    let re = Regex::new(r"^(ssh://\w+@\w+/|\w+@\w+:)\w+(/\w+)*(.git)?$").unwrap();
-    if re.is_match(&val) {
+pub fn is_url_or_ssh_repo(val: String) -> Result<(), String> {
+    if let Ok(_) = val.parse::<Url>() {
+        return Ok(())
+    }
+    if is_ssh_repo(val) {
         Ok(())
     } else {
         Err("the given path does not specify a valid remote repo.".to_owned())
     }
 }
 
-pub fn is_url_or_ssh_repo(val: String) -> Result<(), String> {
-    is_url(val).or_else(is_ssh_repo)
+fn is_ssh_repo(val: String) -> bool {
+    let re = Regex::new(r"^(ssh://\w+@\w+/|\w+@\w+:)\w+(/\w+)*(.git)?$").expect("ssh regex was invalid");
+    re.is_match(&val)
 }
+

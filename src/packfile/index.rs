@@ -31,7 +31,7 @@ use std::fs::File;
 use std::path::Path;
 
 use crate::store::Sha;
-use crate::store::GitObject;
+use crate::store::PackedObject;
 
 static MAGIC: [u8; 4] = [255, 116, 79, 99];
 static VERSION: u32 = 2;
@@ -61,9 +61,7 @@ impl PackIndex {
         };
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
-        Self::parse(&contents).map(|parsed| {
-            Some(parsed)
-        })
+        Self::parse(&contents).map(Some)
     }
 
     #[allow(unused)]
@@ -182,19 +180,19 @@ impl PackIndex {
     /// Creates an index from a list of objects and their offsets
     /// into the packfile.
     ///
-    pub fn from_objects(mut objects: Vec<(usize, u32, GitObject)>, pack_sha: &Sha) -> Self {
+    pub fn from_objects(mut objects: Vec<(usize, u32, PackedObject)>, pack_sha: &Sha) -> Self {
         let size = objects.len();
         let mut fanout = [0u32; 256];
-        let mut offsets = vec![0; size];
-        let mut shas = Vec::with_capacity(20);
-        let mut checksums: Vec<u32> = vec![0; size];
+        let mut offsets = Vec::with_capacity(size);
+        let mut shas = Vec::with_capacity(size);
+        let mut checksums: Vec<u32> = Vec::with_capacity(size);
 
         // Sort the objects by SHA
         objects.sort_by(|&(_, _, ref oa), &(_, _, ref ob)| {
             oa.sha().cmp(&ob.sha())
         });
 
-        for (i, &(offset, crc, ref obj)) in objects.iter().enumerate() {
+        for &(offset, crc, ref obj) in objects.iter() {
             let sha = obj.sha();
 
             // Checksum should be of packed content in the packfile.
@@ -204,8 +202,8 @@ impl PackIndex {
                 *f += 1;
             }
             shas.push(sha);
-            offsets[i] = offset as u32;
-            checksums[i] = crc;
+            offsets.push(offset as u32);
+            checksums.push(crc);
         }
         assert_eq!(size as u32, fanout[255]);
         PackIndex {

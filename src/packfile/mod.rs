@@ -15,7 +15,7 @@ use std::path::Path;
 use std::io::{self,Read,Write};
 use std::collections::HashMap;
 
-use crate::store::{GitObject, GitObjectType, Sha};
+use crate::store::{PackedObject, ObjectType, Sha};
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 static HEADER_LENGTH: usize = 12; // Magic + Len + Version
@@ -32,29 +32,29 @@ pub struct PackFile {
 }
 
 ///
-/// An object in the packfile, which may or may not be delta encoded.
+/// An object entry in the packfile, which may or may not be delta encoded.
 ///
-pub enum PackObject {
-    Base(GitObject),
+pub enum PackEntry {
+    Base(PackedObject),
     OfsDelta(usize, Vec<u8>),
     RefDelta(Sha, Vec<u8>),
 }
 
-impl PackObject {
+impl PackEntry {
     pub fn is_base(&self) -> bool {
-        matches!(*self, PackObject::Base(_))
+        matches!(*self, PackEntry::Base(_))
     }
 
-    pub fn unwrap(self) -> GitObject {
+    pub fn unwrap(self) -> PackedObject {
         match self {
-            PackObject::Base(b) => b,
+            PackEntry::Base(b) => b,
             _ => panic!("Called `GitObject::unwrap` on a deltified object")
         }
     }
 
     pub fn patch(&self, delta: &[u8]) -> Option<Self> {
-        if let PackObject::Base(ref b) = *self {
-            Some(PackObject::Base(b.patch(delta)))
+        if let PackEntry::Base(ref b) = *self {
+            Some(PackEntry::Base(b.patch(delta)))
         } else {
             None
         }
@@ -62,9 +62,9 @@ impl PackObject {
 
     pub fn crc32(&self) -> u32 {
         let content = match *self {
-            PackObject::Base(ref b) => &b.content[..][..],
-            PackObject::RefDelta(_, ref c) => &c[..],
-            PackObject::OfsDelta(_, ref c) => &c[..],
+            PackEntry::Base(ref b) => &b.content[..][..],
+            PackEntry::RefDelta(_, ref c) => &c[..],
+            PackEntry::OfsDelta(_, ref c) => &c[..],
         };
         let mut h = CrcHasher::new();
         h.update(content);
@@ -103,8 +103,9 @@ impl PackFile {
 
             // Use slice::split_at
             contents = &contents[..contents_len - 20];
-            let objects = Objects::new(contents, num_objects).collect();
-            let index = idx.unwrap_or_else(|| PackIndex::from_objects(objects, &sha_computed));
+            let index = idx.unwrap_or_else(|| {
+                PackIndex::from_objects(Objects::new(contents, num_objects).collect(), &sha_computed)
+            });
 
             Ok(PackFile {
                 version,
@@ -154,7 +155,7 @@ impl PackFile {
         &self.sha
     }
 
-    pub fn find_by_sha(&self, sha: &Sha) -> Result<Option<GitObject>> {
+    pub fn find_by_sha(&self, sha: &Sha) -> Result<Option<PackedObject>> {
         let off = self.index.find(sha);
         match off {
             Some(offset) => self.find_by_offset(offset),
@@ -162,7 +163,7 @@ impl PackFile {
         }
     }
 
-    fn find_by_sha_unresolved(&self, sha: &Sha) -> Result<Option<PackObject>> {
+    fn find_by_sha_unresolved(&self, sha: &Sha) -> Result<Option<PackEntry>> {
         let off = self.index.find(sha);
         match off {
             Some(offset) => Ok(Some(self.read_at_offset(offset)?)),
@@ -170,12 +171,12 @@ impl PackFile {
         }
     }
 
-    fn find_by_offset(&self, mut offset: usize) -> Result<Option<GitObject>> {
+    fn find_by_offset(&self, mut offset: usize) -> Result<Option<PackedObject>> {
         // Read the initial offset.
         //
         // If it is a base object, return the enclosing object.
         let mut object = self.read_at_offset(offset)?;
-        if let PackObject::Base(base) = object {
+        if let PackEntry::Base(base) = object {
             return Ok(Some(base));
         };
         // Otherwise we will have to recreate the delta object.
@@ -189,7 +190,7 @@ impl PackFile {
         while !object.is_base() {
             let next;
             match object {
-                PackObject::OfsDelta(delta_offset, patch) => {
+                PackEntry::OfsDelta(delta_offset, patch) => {
                     patches.push(patch);
                     // This offset is *relative* to its own position
                     // We don't need to store multiple chains because a delta chain
@@ -197,7 +198,7 @@ impl PackFile {
                     offset -= delta_offset;
                     next = Some(self.read_at_offset(offset)?);
                 },
-                PackObject::RefDelta(sha, patch) => {
+                PackEntry::RefDelta(sha, patch) => {
                     patches.push(patch);
                     next = self.find_by_sha_unresolved(&sha)?;
                 },
@@ -222,10 +223,10 @@ impl PackFile {
         Ok(Some(object.unwrap()))
     }
 
-    fn read_at_offset(&self, offset: usize) -> Result<PackObject> {
+    fn read_at_offset(&self, offset: usize) -> Result<PackEntry> {
         let total_offset = offset - HEADER_LENGTH;
         let contents = &self.encoded_objects[total_offset..];
-        let mut reader = ObjectReader::new(contents);
+        let mut reader = EntryReader::new(contents);
         reader.read_object()
     }
 }
@@ -235,19 +236,19 @@ impl PackFile {
 /// with their offsets.
 ///
 pub struct Objects<R> {
-    reader: ObjectReader<R>,
+    reader: EntryReader<R>,
     remaining: usize,
-    base_objects: HashMap<Sha, GitObject>,
+    base_objects: HashMap<Sha, PackedObject>,
     base_offsets: HashMap<usize, Sha>,
-    ref_deltas: Vec<(usize, u32, PackObject)>,
-    ofs_deltas: Vec<(usize, u32, PackObject)>,
+    ref_deltas: Vec<(usize, u32, PackEntry)>,
+    ofs_deltas: Vec<(usize, u32, PackEntry)>,
     resolve: bool,
 }
 
 impl<R> Objects<R> where R: Read {
     fn new(reader: R, size: usize) -> Self {
         Objects {
-            reader: ObjectReader::new(reader),
+            reader: EntryReader::new(reader),
             remaining: size,
             ref_deltas: Vec::new(),
             base_objects: HashMap::new(),
@@ -257,9 +258,9 @@ impl<R> Objects<R> where R: Read {
         }
     }
 
-    fn resolve_ref_delta(&mut self) -> Option<(usize, u32, GitObject)> {
+    fn resolve_ref_delta(&mut self) -> Option<(usize, u32, PackedObject)> {
         match self.ref_deltas.pop() {
-            Some((offset, checksum, PackObject::RefDelta(base_sha, patch))) => {
+            Some((offset, checksum, PackEntry::RefDelta(base_sha, patch))) => {
                 let patched = {
                     let base_object = self.base_objects.get(&base_sha).unwrap();
                     base_object.patch(&patch)
@@ -276,9 +277,9 @@ impl<R> Objects<R> where R: Read {
         }
     }
 
-    fn resolve_ofs_delta(&mut self) -> Option<(usize, u32, GitObject)> {
+    fn resolve_ofs_delta(&mut self) -> Option<(usize, u32, PackedObject)> {
         match self.ofs_deltas.pop() {
-            Some((offset, checksum, PackObject::OfsDelta(base, patch))) => {
+            Some((offset, checksum, PackEntry::OfsDelta(base, patch))) => {
                 let patched = {
                     let base = offset - base;
                     let base_sha = self.base_offsets.get(&base).unwrap();
@@ -298,7 +299,7 @@ impl<R> Objects<R> where R: Read {
 
 impl<R> Iterator for Objects<R> where R: Read {
     // (offset, crc32, Object)
-    type Item = (usize, u32, GitObject);
+    type Item = (usize, u32, PackedObject);
 
     fn next(&mut self) -> Option<Self::Item> {
         // First yield all the base objects
@@ -309,9 +310,9 @@ impl<R> Iterator for Objects<R> where R: Read {
             let checksum = object.crc32();
 
             match object {
-                PackObject::OfsDelta(_, _) => self.ofs_deltas.push((offset, checksum, object)),
-                PackObject::RefDelta(_, _) => self.ref_deltas.push((offset, checksum, object)),
-                PackObject::Base(base) => {
+                PackEntry::OfsDelta(_, _) => self.ofs_deltas.push((offset, checksum, object)),
+                PackEntry::RefDelta(_, _) => self.ref_deltas.push((offset, checksum, object)),
+                PackEntry::Base(base) => {
                     {
                         let sha = base.sha();
                         self.base_offsets.insert(offset, sha.clone());
@@ -336,7 +337,7 @@ use std::cmp;
 
 const BUFFER_SIZE: usize = 4 * 1024;
 
-pub struct ObjectReader<R> {
+pub struct EntryReader<R> {
     inner: R,
     pos: usize,
     cap: usize,
@@ -345,9 +346,9 @@ pub struct ObjectReader<R> {
 }
 
 
-impl<R> ObjectReader<R> where R: Read {
+impl<R> EntryReader<R> where R: Read {
     pub fn new(inner: R) -> Self {
-        ObjectReader {
+        EntryReader {
             inner,
             pos: 0,
             cap: 0,
@@ -356,7 +357,7 @@ impl<R> ObjectReader<R> where R: Read {
         }
     }
 
-    pub fn read_object(&mut self) -> Result<PackObject> {
+    pub fn read_object(&mut self) -> Result<PackEntry> {
         let mut c = self.read_u8()?;
         let type_id = (c >> 4) & 7;
 
@@ -376,18 +377,18 @@ impl<R> ObjectReader<R> where R: Read {
             1 | 2 | 3 | 4 => {
                 let content = self.read_object_content(size)?;
                 let base_type = match type_id {
-                    1 => GitObjectType::Commit,
-                    2 => GitObjectType::Tree,
-                    3 => GitObjectType::Blob,
-                    4 => GitObjectType::Tag,
+                    1 => ObjectType::Commit,
+                    2 => ObjectType::Tree,
+                    3 => ObjectType::Blob,
+                    4 => ObjectType::Tag,
                     _ => unreachable!()
                 };
-                Ok(PackObject::Base(GitObject::new(base_type, content)))
+                Ok(PackEntry::Base(PackedObject::new(base_type, content)))
             },
             6 => {
                 let offset = self.read_offset()?;
                 let content = self.read_object_content(size)?;
-                Ok(PackObject::OfsDelta(offset, content))
+                Ok(PackEntry::OfsDelta(offset, content))
             },
             7 => {
                 let mut base_content: [u8; 20] = [0; 20];
@@ -395,7 +396,7 @@ impl<R> ObjectReader<R> where R: Read {
                 let base = Sha::from_bytes(&base_content[..]).unwrap();
 
                 let content = self.read_object_content(size)?;
-                Ok(PackObject::RefDelta(base, content))
+                Ok(PackEntry::RefDelta(base, content))
             }
             _ => panic!("Unexpected id for git object")
         }
@@ -467,7 +468,7 @@ impl<R> ObjectReader<R> where R: Read {
     }
 }
 
-impl<R: Read> Read for ObjectReader<R> {
+impl<R: Read> Read for EntryReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         // If we don't have any buffered data and we're doing a massive read
         // (larger than our internal buffer), bypass our internal buffer

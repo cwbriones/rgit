@@ -30,7 +30,7 @@ use chrono::naive::NaiveDateTime;
 use chrono::DateTime;
 use chrono::offset::FixedOffset;
 
-use crate::store::GitObject;
+use crate::store::PackedObject;
 use crate::store::Sha;
 
 pub struct Person<'a> {
@@ -46,11 +46,11 @@ pub struct Commit<'a> {
     #[allow(dead_code)]
     committer: Person<'a>,
     message: &'a str,
-    raw: &'a GitObject
+    raw: &'a PackedObject
 }
 
 impl<'a> Commit<'a> {
-    pub fn from_raw(raw: &'a GitObject) -> Option<Self> {
+    pub fn from_raw(raw: &'a PackedObject) -> Option<Self> {
         if let IResult::Done(_, raw_parts) = parse_commit_inner(&raw.content) {
             let (tree, parents, author, committer, message) = raw_parts;
             Some(Commit {
@@ -140,14 +140,14 @@ named!(parse_commit_inner<&[u8], (Sha, Vec<Sha>, Person, Person, &str)>,
     tree: map!(take!(40), |hex_sha| {
         // FIXME: This and parent below can use unchecked by
         // making the parser hex-aware
-        Sha::from_hex(hex_sha).unwrap()
+        Sha::from_hex(hex_sha).expect("parsed hex was invalid")
     }) ~
     newline ~
     parents: many0!(
         chain!(
             tag!("parent ") ~
             parent: map!(take!(40), |hex_sha| {
-                Sha::from_hex(hex_sha).unwrap()
+                Sha::from_hex(hex_sha).expect("parsed hex was invalid")
             }) ~
             newline ,
             || { parent }

@@ -29,15 +29,15 @@ pub enum ObjectType {
 /// A parsed Git object found in the database.
 ///
 #[derive(Clone)]
-pub struct Object {
+pub struct PackedObject {
     pub obj_type: ObjectType,
     pub content: Vec<u8>,
     sha: RefCell<Option<Sha>>
 }
 
-impl Object {
+impl PackedObject {
     pub fn new(obj_type: ObjectType, content: Vec<u8>) -> Self {
-        Object {
+        PackedObject {
             obj_type,
             content,
             sha: RefCell::new(None)
@@ -45,7 +45,7 @@ impl Object {
     }
 
     pub fn patch(&self, patch: &[u8]) -> Self {
-        Object {
+        PackedObject {
             obj_type: self.obj_type,
             content: delta::patch(&self.content, patch),
             sha: RefCell::new(None)
@@ -69,7 +69,7 @@ impl Object {
         let split_idx = inflated.iter().position(|x| *x == 0).unwrap();
         let (obj_type, size) = {
             let header = str::from_utf8(&inflated[..split_idx]).unwrap();
-            Object::parse_header(header)
+            PackedObject::parse_header(header)
         };
 
         let mut footer = Vec::new();
@@ -77,7 +77,7 @@ impl Object {
 
         assert_eq!(footer.len(), size);
 
-        Ok(Object {
+        Ok(PackedObject {
             obj_type,
             content: footer,
             sha: RefCell::new(Some(sha.clone())),
