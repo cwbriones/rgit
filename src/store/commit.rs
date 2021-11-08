@@ -18,6 +18,7 @@ use nom::{
     map_res_impl,
     named,
     newline,
+    opt,
     rest,
     space,
     tag,
@@ -51,18 +52,19 @@ pub struct Commit<'a> {
 
 impl<'a> Commit<'a> {
     pub fn from_raw(raw: &'a PackedObject) -> Option<Self> {
-        if let IResult::Done(_, raw_parts) = parse_commit_inner(&raw.content) {
-            let (tree, parents, author, committer, message) = raw_parts;
-            Some(Commit {
-                tree,
-                parents,
-                author,
-                committer,
-                message,
-                raw,
-            })
-        } else {
-            None
+        match parse_commit_inner(&raw.content) {
+            IResult::Done(_, raw_parts) => {
+                let (tree, parents, author, committer, message) = raw_parts;
+                Some(Commit {
+                    tree,
+                    parents,
+                    author,
+                    committer,
+                    message,
+                    raw,
+                })
+            },
+            _ => None,
         }
     }
 }
@@ -134,6 +136,24 @@ named!(pub parse_person<&[u8],Person>,
     )
 );
 
+named!(gpgsig<&[u8], ()>,
+  chain!(
+    tag!("gpgsig")
+    ~
+    _begin: take_until_and_consume!("\n")
+    ~
+    _content: many0!(
+      chain!(
+          space
+          ~
+          take_until_and_consume!("\n"),
+          || ()
+      )
+    ),
+    || ()
+  )
+);
+
 named!(parse_commit_inner<&[u8], (Sha, Vec<Sha>, Person, Person, &str)>,
   chain!(
     tag!("tree ") ~
@@ -157,6 +177,7 @@ named!(parse_commit_inner<&[u8], (Sha, Vec<Sha>, Person, Person, &str)>,
     author: parse_person ~
     tag!("committer ") ~
     committer: parse_person ~
+    _gpg: opt!(gpgsig) ~
     line_ending ~
     message: map_res!(rest, str::from_utf8),
     || (tree, parents, author, committer, message)
@@ -166,7 +187,7 @@ named!(parse_commit_inner<&[u8], (Sha, Vec<Sha>, Person, Person, &str)>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{GitObject, GitObjectType};
+    use crate::store::{PackedObject, ObjectType};
     use nom::IResult;
     
 
@@ -190,7 +211,7 @@ mod tests {
             \n\
             Bump version to 1.6";
         let input2 = b"tree 9f5829a852fcd8e3381e343b45cb1c9ff33abf56\nauthor Christian Briones <christian@whisper.sh> 1418004896 -0800\ncommitter Christian Briones <christian@whisper.sh> 1418004914 -0800\n\ninit\n";
-        let object = GitObject::new(GitObjectType::Commit, (&input[..]).to_owned());
+        let object = PackedObject::new(ObjectType::Commit, (&input[..]).to_owned());
         if let Some(commit) = Commit::from_raw(&object) {
             assert_eq!(commit.tree, Sha::from_hex(b"abdf456789012345678901234567890123456789").unwrap());
             let parents = vec![
@@ -203,7 +224,19 @@ mod tests {
             panic!("Failed to parse commit.");
         }
 
-        let object2 = GitObject::new(GitObjectType::Commit, (&input2[..]).to_owned());
+        let object2 = PackedObject::new(ObjectType::Commit, (&input2[..]).to_owned());
         assert!(Commit::from_raw(&object2).is_some())
+    }
+
+    #[test]
+    fn test_gpg_field() {
+        let input = b"tree 639020696c82665786f02e6081336171c4afafad\n\
+                      parent 91e34e77c97bd44eab14e6fe6b636b2588a269cc\n\
+                      author Jon Gjengset <jon@thesquareplanet.com> 1625115559 -0700\n\
+                      committer Jon Gjengset <jon@thesquareplanet.com> 1625115559 -0700\n\
+                      gpgsig -----BEGIN PGP SIGNATURE-----\n \n iHUEABYKAB0WIQRIAlMG/9GjsFwKNi2GO0ihHCONWgUCYN1LpwAKCRCGO0ihHCON\n Woa/AP9c3+/Yw8Yr6VfS8fsU4s/5Vq+uFmnEhAC6Y6iSdjVO+wEA+0cAR061hopo\n 5wD8cNB/3HInkW9RT/C+A31I6mTgKQU=\n =h5wm\n -----END PGP SIGNATURE-----\n\nMissed a clippy lint in rayon behind feature\n";
+
+        let object = PackedObject::new(ObjectType::Commit, (&input[..]).to_owned());
+        let _commit = Commit::from_raw(&object).expect("failed to parse commit");
     }
 }

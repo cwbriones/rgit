@@ -20,6 +20,7 @@ use std::vec::Vec;
 
 use crate::store::Sha;
 
+#[derive(Debug)]
 pub struct Tree {
     pub entries: Vec<TreeEntry>
 }
