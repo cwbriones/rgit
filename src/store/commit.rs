@@ -68,7 +68,7 @@ impl<'a> Display for Commit<'a> {
         // It's not clear if this is expected, but some commit
         // messages can lack a final newline.
         if !self.message.ends_with('\n') {
-            writeln!(f, "")?;
+            writeln!(f)?;
         }
         Ok(())
     }

@@ -11,8 +11,8 @@ use std::io::{
     self,
     Read,
     Write,
+    BufWriter,
 };
-use std::iter::FromIterator;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{
@@ -82,10 +82,8 @@ impl Sha {
     }
 
     pub fn compute_from_bytes(bytes: &[u8]) -> Self {
-        use sha1::{
-            Digest,
-            Sha1,
-        };
+        use sha1::Sha1;
+        use sha1::Digest;
 
         let contents: [u8; 20] = Sha1::digest(bytes).into();
 
@@ -94,7 +92,7 @@ impl Sha {
 
     pub fn from_array(bytes: &[u8; 20]) -> Self {
         Self {
-            contents: bytes.clone(),
+            contents: *bytes,
         }
     }
 
@@ -413,11 +411,8 @@ impl GitTime {
     }
 }
 
-// FIXME:
-// This doesn't need to read the file a second time.
 fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> Result<IndexEntry> {
-    let file = File::open(path)?;
-    let meta = file.metadata()?;
+    let meta = std::fs::metadata(path)?;
 
     // We need to remove the repo path from the path we save on the index entry
     // FIXME: This doesn't need to be a path since we just discard it again
@@ -458,36 +453,36 @@ fn write_index(repo: &str, index: &mut Index) -> Result<()> {
     path.push(repo);
     path.push(".git");
     path.push("index");
-    let mut idx_file = File::create(path)?;
-    let encoded = encode_index(index)?;
-    idx_file.write_all(&encoded[..])?;
+
+    let idx_file = File::create(path)?;
+    let mut idx_file = BufWriter::new(idx_file);
+    encode_index(index, &mut idx_file)
+}
+
+fn encode_index<W: Write>(idx: &mut Index, w: &mut W) -> Result<()> {
+    let sha = {
+        let mut w = DigestWriter::new(w.by_ref());
+        encode_header(idx.entries().len(), &mut w)?;
+        idx.entries_mut().sort_by(|a, b| a.path.cmp(&b.path));
+        for entry in idx.entries() {
+            encode_entry(entry, &mut w)?;
+        }
+        for ext in idx.extensions() {
+            w.write_all(&ext.sig[..])?;
+            w.write_u32::<BigEndian>(ext.contents.len() as u32)?;
+            w.write_all(&ext.contents[..])?;
+        }
+        w.finalize()
+    };
+    w.write_all(sha.as_bytes())?;
     Ok(())
 }
 
-fn encode_index(idx: &mut Index) -> Result<Vec<u8>> {
-    let mut encoded = index_header(idx.entries().len())?;
-    idx.entries_mut().sort_by(|a, b| a.path.cmp(&b.path));
-    let entries = idx
-        .entries()
-        .iter()
-        .map(|e| encode_entry(e))
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut encoded_entries = entries.concat();
-    encoded.append(&mut encoded_entries);
-
-    for ext in idx.extensions() {
-        encoded.extend_from_slice(&ext.sig[..]);
-        encoded.write_u32::<BigEndian>(ext.contents.len() as u32)?;
-        encoded.extend_from_slice(&ext.contents[..]);
-    }
-
-    let sha = Sha::compute_from_bytes(&encoded);
-    encoded.extend_from_slice(sha.as_bytes());
-    Ok(encoded)
-}
-
-fn encode_entry(entry: &IndexEntry) -> Result<Vec<u8>> {
-    let mut buf: Vec<u8> = Vec::with_capacity(62);
+fn encode_entry<W>(entry: &IndexEntry, w: &mut W) -> Result<()>
+where
+    W: Write,
+{
+    let mut w = CountWriter::new(w);
     let &IndexEntry {
         ctime,
         mtime,
@@ -513,49 +508,69 @@ fn encode_entry(entry: &IndexEntry) -> Result<Vec<u8>> {
         _ => unreachable!("Tried to create an index entry for a non-indexable object"),
     };
     let encoded_mode = (encoded_type << 12) | perms;
-
-    let path_and_padding = {
-        // This is the total length of the index entry file
-        // NUL-terminated and padded with enough NUL bytes to pad
-        // the entry to a multiple of 8 bytes.
-        //
-        // The -2 is because of the amount needed to compensate for the flags
-        // only being 2 bytes.
-        let mut v: Vec<u8> = Vec::from_iter(path.as_bytes().iter().cloned());
-        v.push(0u8);
-        let padding_size = 8 - ((v.len() - 2) % 8);
-        let padding = vec![0u8; padding_size];
-        if padding_size != 8 {
-            v.extend_from_slice(&padding[..]);
-        }
-        v
-    };
-
-    buf.write_u32::<BigEndian>(ctime.secs)?;
-    buf.write_u32::<BigEndian>(ctime.nanos)?;
-    buf.write_u32::<BigEndian>(mtime.secs)?;
-    buf.write_u32::<BigEndian>(mtime.nanos)?;
-    buf.write_u32::<BigEndian>(device as u32)?;
-    buf.write_u32::<BigEndian>(inode as u32)?;
-    buf.write_u32::<BigEndian>(encoded_mode)?;
-    buf.write_u32::<BigEndian>(uid as u32)?;
-    buf.write_u32::<BigEndian>(gid as u32)?;
-    buf.write_u32::<BigEndian>(size as u32)?;
-    buf.extend_from_slice(sha.as_bytes());
-    buf.write_u16::<BigEndian>(flags)?;
-    buf.extend(path_and_padding);
-    Ok(buf)
+    w.write_u32::<BigEndian>(ctime.secs)?;
+    w.write_u32::<BigEndian>(ctime.nanos)?;
+    w.write_u32::<BigEndian>(mtime.secs)?;
+    w.write_u32::<BigEndian>(mtime.nanos)?;
+    w.write_u32::<BigEndian>(device as u32)?;
+    w.write_u32::<BigEndian>(inode as u32)?;
+    w.write_u32::<BigEndian>(encoded_mode)?;
+    w.write_u32::<BigEndian>(uid as u32)?;
+    w.write_u32::<BigEndian>(gid as u32)?;
+    w.write_u32::<BigEndian>(size as u32)?;
+    w.write_all(sha.as_bytes())?;
+    w.write_u16::<BigEndian>(flags)?;
+    w.write_all(path.as_bytes())?;
+    w.write_u8(0u8)?;
+    const ALIGN: usize = std::mem::size_of::<u64>();
+    let padding_size = ALIGN - (w.total_written() % ALIGN);
+    if padding_size != ALIGN {
+        let padding = [0u8; ALIGN];
+        w.write_all(&padding[..padding_size])?;
+    }
+    Ok(())
 }
 
 const GIT_INDEX_MAGIC: u32 = 1145655875; // "DIRC"
 const GIT_INDEX_VERSION: u32 = 2;
 
-fn index_header(num_entries: usize) -> io::Result<Vec<u8>> {
-    let mut header = Vec::with_capacity(12);
-    header.write_u32::<BigEndian>(GIT_INDEX_MAGIC)?;
-    header.write_u32::<BigEndian>(GIT_INDEX_VERSION)?;
-    header.write_u32::<BigEndian>(num_entries as u32)?;
-    Ok(header)
+fn encode_header<W>(num_entries: usize, w: &mut W) -> io::Result<()>
+where
+    W: Write,
+{
+    let version: u32 = 2;
+    let magic = 1145655875; // "DIRC"
+    w.write_u32::<BigEndian>(magic)?;
+    w.write_u32::<BigEndian>(version)?;
+    w.write_u32::<BigEndian>(num_entries as u32)?;
+    Ok(())
+}
+
+struct CountWriter<W> {
+    writer: W,
+    total: usize,
+}
+
+impl<W: Write> CountWriter<W> {
+    pub fn new(writer: W) -> Self {
+        Self { writer, total: 0 }
+    }
+
+    pub fn total_written(&self) -> usize {
+        self.total
+    }
+}
+
+impl<W: Write> Write for CountWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, std::io::Error> {
+        let written = self.writer.write(bytes)?;
+        self.total += written;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        self.writer.flush()
+    }
 }
 
 use std::io::BufRead;
@@ -584,11 +599,8 @@ pub fn read_index<R: BufRead + Seek>(mut r: R) -> Result<Index> {
     }
     // Try to read extensions while we can
     let mut extensions = Vec::new();
-    loop {
-        match read_extension(r.by_ref())? {
-            Some(ext) => extensions.push(ext),
-            None => break,
-        }
+    while let Some(ext) = read_extension(r.by_ref())? {
+        extensions.push(ext);
     }
     let mut checksum = [0u8; 20];
     r.read_exact(&mut checksum[..])?;
@@ -718,7 +730,7 @@ fn read_time<R: Read>(mut r: R) -> Result<GitTime> {
     Ok(GitTime::new(sec, nsec))
 }
 
-pub struct DigestReader<R> {
+struct DigestReader<R> {
     inner: R,
     digest: sha1::Sha1,
 }
@@ -759,6 +771,42 @@ impl<R: BufRead> BufRead for DigestReader<R> {
 
     fn consume(&mut self, count: usize) {
         self.inner.consume(count);
+    }
+}
+
+struct DigestWriter<W> {
+    writer: W,
+    digest: sha1::Sha1,
+}
+
+impl<W: Write> DigestWriter<W> {
+    pub fn new(writer: W) -> Self {
+        use sha1::Digest;
+
+        Self {
+            writer,
+            digest: Digest::new(),
+        }
+    }
+
+    pub fn finalize(self) -> Sha {
+        use sha1::Digest;
+
+        let bytes: [u8; 20] = self.digest.finalize().into();
+        Sha::from_bytes(&bytes[..]).unwrap()
+    }
+}
+
+impl<W: Write> Write for DigestWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, std::io::Error> {
+        use sha1::Digest;
+
+        self.digest.update(bytes);
+        self.writer.write(bytes)
+    }
+
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        self.writer.flush()
     }
 }
 
@@ -827,7 +875,8 @@ mod tests {
             },
         ];
         assert_eq!(index.entries_mut(), expected_entries);
-        let encoded = encode_index(&mut index)?;
+        let mut encoded = Vec::new();
+        encode_index(&mut index, &mut encoded)?;
 
         let mismatch = encoded
             .iter()

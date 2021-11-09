@@ -146,7 +146,7 @@ impl PackedObject {
             "tree" => ObjectType::Tree,
             "blob" => ObjectType::Blob,
             "tag" => ObjectType::Tag,
-            _ => Err(anyhow!("unknown object type: {}", t))?,
+            _ => return Err(anyhow!("unknown object type: {}", t)),
         };
         let size = s.parse::<usize>().unwrap();
         Ok((obj_type, size))

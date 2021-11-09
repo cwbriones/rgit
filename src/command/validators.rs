@@ -2,7 +2,7 @@ use regex::Regex;
 use reqwest::Url;
 
 pub fn is_url_or_ssh_repo(val: String) -> Result<(), String> {
-    if let Ok(_) = val.parse::<Url>() {
+    if val.parse::<Url>().is_ok() {
         return Ok(());
     }
     if is_ssh_repo(val) {
