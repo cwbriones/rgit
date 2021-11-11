@@ -13,6 +13,7 @@ use std::path::{Path,PathBuf};
 use std::os::unix::fs::MetadataExt;
 use std::iter::FromIterator;
 
+use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
 use byteorder::{BigEndian, WriteBytesExt};
@@ -38,7 +39,7 @@ impl std::error::Error for DecodeShaError {
 
 impl std::fmt::Display for DecodeShaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
+        match self {
             DecodeShaError::InvalidChar => write!(f, "invalid char"),
             DecodeShaError::InvalidLength(l) => write!(f, "invalid length: {}", l),
         }
@@ -201,7 +202,7 @@ impl Repo {
             let mut full_path = PathBuf::new();
             full_path.push(parent);
             full_path.push(path);
-            match *mode {
+            match mode {
                 EntryMode::SubDirectory => {
                     fs::create_dir_all(&full_path)?;
                     let path_str = full_path.to_str().unwrap();
@@ -230,7 +231,9 @@ impl Repo {
                         sha)?;
                     idx.push(idx_entry);
                 },
-                ref e => panic!("Unsupported Entry Mode {:?}", e)
+                e => {
+                    return Err(anyhow!("Unsupported Entry Mode {:?}", e))
+                }
             }
         }
         Ok(())

@@ -1,3 +1,5 @@
+use anyhow::anyhow;
+use anyhow::Result;
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
@@ -55,7 +57,7 @@ impl PackedObject {
     ///
     /// Opens the given object from loose form in the repo.
     ///
-    pub fn open(repo: &str, sha: &Sha) -> IoResult<Self> {
+    pub fn open(repo: &str, sha: &Sha) -> Result<Self> {
         let path = object_path(repo, sha);
 
         let mut inflated = Vec::new();
@@ -69,7 +71,7 @@ impl PackedObject {
         let split_idx = inflated.iter().position(|x| *x == 0).unwrap();
         let (obj_type, size) = {
             let header = str::from_utf8(&inflated[..split_idx]).unwrap();
-            PackedObject::parse_header(header)
+            PackedObject::parse_header(header)?
         };
 
         let mut footer = Vec::new();
@@ -127,23 +129,21 @@ impl PackedObject {
         Ok(())
     }
 
-    fn parse_header(header: &str) -> (ObjectType, usize) {
+    fn parse_header(header: &str) -> Result<(ObjectType, usize)> {
         let split: Vec<&str> = header.split(' ').collect();
-        if split.len() == 2 {
-            let (t, s) = (split[0], split[1]);
-            let obj_type = match t {
-                "commit" => ObjectType::Commit,
-                "tree" => ObjectType::Tree,
-                "blob" => ObjectType::Blob,
-                "tag" => ObjectType::Tag,
-                _ => panic!("unknown object type")
-            };
-            let size = s.parse::<usize>().unwrap();
-
-            (obj_type, size)
-        } else {
-            panic!("Bad object header")
+        if split.len() != 2 {
+            return Err(anyhow!("Bad object header"));
         }
+        let (t, s) = (split[0], split[1]);
+        let obj_type = match t {
+            "commit" => ObjectType::Commit,
+            "tree" => ObjectType::Tree,
+            "blob" => ObjectType::Blob,
+            "tag" => ObjectType::Tag,
+            _ => Err(anyhow!("unknown object type: {}", t))?
+        };
+        let size = s.parse::<usize>().unwrap();
+        Ok((obj_type, size))
     }
 
     fn header(&self) -> Vec<u8> {

@@ -56,7 +56,7 @@ impl PackIndex {
 
         let mut file = match File::open(path) {
             Ok(file) => file,
-            Err(ref io_error @ IoError{..}) if ErrorKind::NotFound == io_error.kind() => return Ok(None),
+            Err(io_error @ IoError{..}) if ErrorKind::NotFound == io_error.kind() => return Ok(None),
             Err(io) => return Err(io),
         };
         let mut contents = Vec::new();

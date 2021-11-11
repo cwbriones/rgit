@@ -2,6 +2,7 @@ pub mod refs;
 mod index;
 
 use anyhow::{
+    anyhow,
     Context,
     Result,
 };
@@ -41,7 +42,7 @@ pub enum PackEntry {
 
 impl PackEntry {
     pub fn is_base(&self) -> bool {
-        matches!(*self, PackEntry::Base(_))
+        matches!(self, PackEntry::Base(_))
     }
 
     pub fn unwrap(self) -> PackedObject {
@@ -52,7 +53,7 @@ impl PackEntry {
     }
 
     pub fn patch(&self, delta: &[u8]) -> Option<Self> {
-        if let PackEntry::Base(ref b) = *self {
+        if let PackEntry::Base(b) = self {
             Some(PackEntry::Base(b.patch(delta)))
         } else {
             None
@@ -60,10 +61,10 @@ impl PackEntry {
     }
 
     pub fn crc32(&self) -> u32 {
-        let content = match *self {
-            PackEntry::Base(ref b) => &b.content[..][..],
-            PackEntry::RefDelta(_, ref c) => &c[..],
-            PackEntry::OfsDelta(_, ref c) => &c[..],
+        let content = match self {
+            PackEntry::Base(b) => &b.content[..][..],
+            PackEntry::RefDelta(_, c) => &c[..],
+            PackEntry::OfsDelta(_, c) => &c[..],
         };
         let mut h = CrcHasher::new();
         h.update(content);
@@ -386,7 +387,7 @@ impl<R> EntryReader<R> where R: Read + BufRead {
                 let content = self.decompress_content(size)?;
                 Ok(PackEntry::RefDelta(base, content))
             }
-            _ => panic!("Unexpected id for git object")
+            _ => return Err(anyhow!("unexpected id for git object: {}", type_id))
         }
     }
 
@@ -424,7 +425,7 @@ impl<R> EntryReader<R> where R: Read + BufRead {
         self.inner.read_u8()
     }
 
-    fn decompress_content(&mut self, size: usize) -> io::Result<Vec<u8>> {
+    fn decompress_content(&mut self, size: usize) -> Result<Vec<u8>> {
         let mut object_buffer = Vec::with_capacity(size);
 
         use flate2::Status;
@@ -445,7 +446,11 @@ impl<R> EntryReader<R> where R: Read + BufRead {
             match res {
                 Ok(Status::StreamEnd) => {
                     if decompressor.total_out() as usize != size {
-                        panic!("Size does not match for expected object contents");
+                        return Err(anyhow!(
+                            "decompressed size does not match header: {} != {}",
+                            decompressor.total_out(),
+                            size,
+                        ));
                     }
                     return Ok(object_buffer);
                 },
@@ -456,11 +461,9 @@ impl<R> EntryReader<R> where R: Read + BufRead {
                 // - Output case: The object buffer was filled before end of stream. This means
                 // that the header we initially read was incorrect and the vec was not
                 // sized.
-                Ok(Status::BufError) => {
-                    panic!("Encountered zlib buffer error");
-                },
+                Ok(Status::BufError) => return Err(anyhow!("zlib buffer error")),
                 Ok(Status::Ok) => (),
-                Err(e) => panic!("Encountered zlib decompression error: {}", e),
+                Err(e) => return Err(anyhow!("zlib decompression error: {}", e)),
             }
         }
     }
