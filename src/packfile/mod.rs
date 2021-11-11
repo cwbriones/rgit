@@ -1,8 +1,6 @@
 pub mod refs;
 mod index;
 
-pub use self::index::PackIndex;
-
 use anyhow::{
     Context,
     Result,
@@ -12,10 +10,11 @@ use crc32fast::Hasher as CrcHasher;
 
 use std::fs::{self, File};
 use std::path::Path;
-use std::io::{self,Read,Write};
+use std::io::{self, Read, Write, BufRead};
 use std::collections::HashMap;
 
 use crate::store::{PackedObject, ObjectType, Sha};
+pub use self::index::PackIndex;
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 static HEADER_LENGTH: usize = 12; // Magic + Len + Version
@@ -245,7 +244,7 @@ pub struct Objects<R> {
     resolve: bool,
 }
 
-impl<R> Objects<R> where R: Read {
+impl<R> Objects<R> where R: Read + BufRead {
     fn new(reader: R, size: usize) -> Self {
         Objects {
             reader: EntryReader::new(reader),
@@ -297,7 +296,7 @@ impl<R> Objects<R> where R: Read {
     }
 }
 
-impl<R> Iterator for Objects<R> where R: Read {
+impl<R> Iterator for Objects<R> where R: Read + BufRead {
     // (offset, crc32, Object)
     type Item = (usize, u32, PackedObject);
 
@@ -306,6 +305,7 @@ impl<R> Iterator for Objects<R> where R: Read {
         while self.remaining > 0 {
             self.remaining -= 1;
             let offset = self.reader.consumed_bytes() + HEADER_LENGTH;
+
             let object = self.reader.read_object().unwrap();
             let checksum = object.crc32();
 
@@ -332,28 +332,16 @@ impl<R> Iterator for Objects<R> where R: Read {
     }
 }
 
-use flate2::{Decompress, Flush, Status};
-use std::cmp;
-
-const BUFFER_SIZE: usize = 4 * 1024;
-
 pub struct EntryReader<R> {
     inner: R,
-    pos: usize,
-    cap: usize,
     consumed_bytes: usize,
-    buf: [u8; BUFFER_SIZE],
 }
 
-
-impl<R> EntryReader<R> where R: Read {
+impl<R> EntryReader<R> where R: Read + BufRead {
     pub fn new(inner: R) -> Self {
         EntryReader {
             inner,
-            pos: 0,
-            cap: 0,
             consumed_bytes: 0,
-            buf: [0; BUFFER_SIZE],
         }
     }
 
@@ -375,7 +363,7 @@ impl<R> EntryReader<R> where R: Read {
 
         match type_id {
             1 | 2 | 3 | 4 => {
-                let content = self.read_object_content(size)?;
+                let content = self.decompress_content(size)?;
                 let base_type = match type_id {
                     1 => ObjectType::Commit,
                     2 => ObjectType::Tree,
@@ -387,7 +375,7 @@ impl<R> EntryReader<R> where R: Read {
             },
             6 => {
                 let offset = self.read_offset()?;
-                let content = self.read_object_content(size)?;
+                let content = self.decompress_content(size)?;
                 Ok(PackEntry::OfsDelta(offset, content))
             },
             7 => {
@@ -395,7 +383,7 @@ impl<R> EntryReader<R> where R: Read {
                 self.read_exact(&mut base_content)?;
                 let base = Sha::from_bytes(&base_content[..]).unwrap();
 
-                let content = self.read_object_content(size)?;
+                let content = self.decompress_content(size)?;
                 Ok(PackEntry::RefDelta(base, content))
             }
             _ => panic!("Unexpected id for git object")
@@ -424,71 +412,60 @@ impl<R> EntryReader<R> where R: Read {
         self.consumed_bytes
     }
 
-    fn read_object_content(&mut self, size: usize) -> io::Result<Vec<u8>> {
-        let mut decompressor = Decompress::new(true);
+    #[inline]
+    fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        self.consumed_bytes += buf.len();
+        self.inner.read_exact(buf)
+    }
+
+    #[inline]
+    fn read_u8(&mut self) -> io::Result<u8> {
+        self.consumed_bytes += 1;
+        self.inner.read_u8()
+    }
+
+    fn decompress_content(&mut self, size: usize) -> io::Result<Vec<u8>> {
         let mut object_buffer = Vec::with_capacity(size);
 
+        use flate2::Status;
+        use flate2::Flush;
+        use flate2::Decompress;
+
+        let mut decompressor = Decompress::new(true);
         loop {
             let last_total_in = decompressor.total_in();
             let res = {
-                let zlib_buffer = self.fill_buffer()?;
+                let zlib_buffer = self.inner.fill_buf()?;
                 decompressor.decompress_vec(zlib_buffer, &mut object_buffer, Flush::None)
             };
             let nread = decompressor.total_in() - last_total_in;
-            self.consume(nread as usize);
+            self.inner.consume(nread as usize);
+            self.consumed_bytes += nread as usize;
 
             match res {
                 Ok(Status::StreamEnd) => {
                     if decompressor.total_out() as usize != size {
                         panic!("Size does not match for expected object contents");
                     }
-
                     return Ok(object_buffer);
                 },
-                Ok(Status::BufError) => panic!("Encountered zlib buffer error"),
+                // The assumption is that reaching BufError is truly an error.
+                // - Input case: The input buffer is empty. We read the buffer before every call to
+                // `decompress_vec`, so if the returned buf is empty then we have truly exhausted
+                // the reader before completing the stream.
+                // - Output case: The object buffer was filled before end of stream. This means
+                // that the header we initially read was incorrect and the vec was not
+                // sized.
+                Ok(Status::BufError) => {
+                    panic!("Encountered zlib buffer error");
+                },
                 Ok(Status::Ok) => (),
                 Err(e) => panic!("Encountered zlib decompression error: {}", e),
             }
         }
     }
-
-    fn fill_buffer(&mut self) -> io::Result<&[u8]> {
-        // If we've reached the end of our internal buffer then we need to fetch
-        // some more data from the underlying reader.
-        if self.pos == self.cap {
-            self.cap = self.inner.read(&mut self.buf)?;
-            self.pos = 0;
-        }
-        Ok(&self.buf[self.pos..self.cap])
-    }
-
-    fn consume(&mut self, amt: usize) {
-        self.consumed_bytes += amt;
-        self.pos = cmp::min(self.pos + amt, self.cap);
-    }
 }
 
-impl<R: Read> Read for EntryReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        // If we don't have any buffered data and we're doing a massive read
-        // (larger than our internal buffer), bypass our internal buffer
-        // entirely.
-        if self.pos == self.cap && buf.len() >= self.buf.len() {
-            let nread = self.inner.read(buf)?;
-            // We still want to keep track of the correct offset so
-            // we consider this consumed.
-            self.consumed_bytes += nread;
-            return Ok(nread);
-        }
-        let nread = {
-            let mut rem = self.fill_buffer()?;
-            rem.read(buf)?
-        };
-        self.consume(nread);
-
-        Ok(nread)
-    }
-}
 
 #[cfg(test)]
 mod tests {
