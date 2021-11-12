@@ -9,9 +9,9 @@ use std::fs::{
 };
 use std::io::{
     self,
+    BufWriter,
     Read,
     Write,
-    BufWriter,
 };
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
@@ -82,8 +82,8 @@ impl Sha {
     }
 
     pub fn compute_from_bytes(bytes: &[u8]) -> Self {
-        use sha1::Sha1;
         use sha1::Digest;
+        use sha1::Sha1;
 
         let contents: [u8; 20] = Sha1::digest(bytes).into();
 
@@ -91,9 +91,7 @@ impl Sha {
     }
 
     pub fn from_array(bytes: &[u8; 20]) -> Self {
-        Self {
-            contents: *bytes,
-        }
+        Self { contents: *bytes }
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeShaError> {
@@ -259,7 +257,7 @@ impl Repo {
         PackedObject::open(&self.dir, sha).or_else(|_| {
             // If this isn't there, read from the packfile
             let pack = self.pack.as_ref().unwrap();
-            pack.find_by_sha(sha).map(|o| o.unwrap())
+            pack.find_by_sha(sha)
         })
     }
 

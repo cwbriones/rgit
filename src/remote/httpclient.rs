@@ -1,6 +1,6 @@
-use std::io;
 use std::io::Read;
 
+use anyhow::Result;
 use reqwest::blocking::Client;
 use reqwest::redirect;
 use reqwest::IntoUrl;
@@ -37,7 +37,7 @@ impl GitHttpClient {
 }
 
 impl GitClient for GitHttpClient {
-    fn discover_refs(&mut self) -> io::Result<Vec<GitRef>> {
+    fn discover_refs(&mut self) -> Result<Vec<GitRef>> {
         let mut discovery_url = self.url.join(REF_DISCOVERY_ENDPOINT).unwrap();
         discovery_url.set_query(Some("service=git-upload-pack"));
 
@@ -58,7 +58,7 @@ impl GitClient for GitHttpClient {
         Ok(refs)
     }
 
-    fn fetch_packfile(&mut self, want: &[GitRef]) -> io::Result<Vec<u8>> {
+    fn fetch_packfile(&mut self, want: &[GitRef]) -> Result<Vec<u8>> {
         let capabilities = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
         let body = super::create_negotiation_request(&capabilities, want);
         let pack_endpoint = self.url.join(UPLOAD_PACK_ENDPOINT).unwrap();

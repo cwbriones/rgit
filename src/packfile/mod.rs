@@ -52,35 +52,37 @@ pub struct PackFile {
 ///
 pub enum PackEntry {
     Base(PackedObject),
-    OfsDelta(usize, Vec<u8>),
-    RefDelta(Sha, Vec<u8>),
+    OfsDelta(OfsDelta),
+    RefDelta(RefDelta),
 }
 
+pub struct OfsDelta {
+    offset: usize,
+    patch: Vec<u8>,
+}
+
+pub struct RefDelta {
+    base: Sha,
+    patch: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct PackEntryNotFound;
+
+impl std::fmt::Display for PackEntryNotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "pack entry not found")
+    }
+}
+
+impl std::error::Error for PackEntryNotFound {}
+
 impl PackEntry {
-    pub fn is_base(&self) -> bool {
-        matches!(self, PackEntry::Base(_))
-    }
-
-    pub fn unwrap(self) -> PackedObject {
-        match self {
-            PackEntry::Base(b) => b,
-            _ => panic!("Called `GitObject::unwrap` on a deltified object"),
-        }
-    }
-
-    pub fn patch(&self, delta: &[u8]) -> Option<Self> {
-        if let PackEntry::Base(b) = self {
-            Some(PackEntry::Base(b.patch(delta)))
-        } else {
-            None
-        }
-    }
-
     pub fn crc32(&self) -> u32 {
         let content = match self {
             PackEntry::Base(b) => &b.content[..][..],
-            PackEntry::RefDelta(_, c) => &c[..],
-            PackEntry::OfsDelta(_, c) => &c[..],
+            PackEntry::RefDelta(d) => &d.patch[..],
+            PackEntry::OfsDelta(o) => &o.patch[..],
         };
         let mut h = CrcHasher::new();
         h.update(content);
@@ -174,29 +176,27 @@ impl PackFile {
         &self.sha
     }
 
-    pub fn find_by_sha(&self, sha: &Sha) -> Result<Option<PackedObject>> {
-        let off = self.index.find(sha);
-        match off {
-            Some(offset) => self.find_by_offset(offset),
-            None => Ok(None),
-        }
+    pub fn find_by_sha(&self, sha: &Sha) -> Result<PackedObject> {
+        self.index
+            .find(sha)
+            .ok_or_else(|| anyhow::Error::from(PackEntryNotFound))
+            .and_then(|offset| self.find_by_offset(offset))
     }
 
-    fn find_by_sha_unresolved(&self, sha: &Sha) -> Result<Option<PackEntry>> {
-        let off = self.index.find(sha);
-        match off {
-            Some(offset) => Ok(Some(self.read_at_offset(offset)?)),
-            None => Ok(None),
-        }
+    fn find_by_sha_unresolved(&self, sha: &Sha) -> Result<PackEntry> {
+        self.index
+            .find(sha)
+            .ok_or_else(|| anyhow::Error::from(PackEntryNotFound))
+            .and_then(|offset| self.read_at_offset(offset))
     }
 
-    fn find_by_offset(&self, mut offset: usize) -> Result<Option<PackedObject>> {
+    fn find_by_offset(&self, mut offset: usize) -> Result<PackedObject> {
         // Read the initial offset.
         //
         // If it is a base object, return the enclosing object.
-        let mut object = self.read_at_offset(offset)?;
-        if let PackEntry::Base(base) = object {
-            return Ok(Some(base));
+        let mut tip = self.read_at_offset(offset)?;
+        if let PackEntry::Base(base) = tip {
+            return Ok(base);
         };
         // Otherwise we will have to recreate the delta object.
         //
@@ -206,31 +206,23 @@ impl PackFile {
         // We need to keep track of all the offsets so they are correct.
         let mut patches = Vec::new();
 
-        while !object.is_base() {
-            let next;
-            match object {
-                PackEntry::OfsDelta(delta_offset, patch) => {
-                    patches.push(patch);
+        let mut accum = loop {
+            match tip {
+                PackEntry::Base(b) => break b,
+                PackEntry::OfsDelta(delta) => {
                     // This offset is *relative* to its own position
                     // We don't need to store multiple chains because a delta chain
                     // will either be offsets or shas but not both.
-                    offset -= delta_offset;
-                    next = Some(self.read_at_offset(offset)?);
+                    offset -= delta.offset;
+                    patches.push(delta.patch);
+                    tip = self.read_at_offset(offset)?
                 }
-                PackEntry::RefDelta(sha, patch) => {
-                    patches.push(patch);
-                    next = self.find_by_sha_unresolved(&sha)?;
+                PackEntry::RefDelta(delta) => {
+                    patches.push(delta.patch);
+                    tip = self.find_by_sha_unresolved(&delta.base)?
                 }
-                _ => unreachable!(),
-            }
-            match next {
-                Some(o) => {
-                    object = o;
-                }
-                // This should be an error that the object is incomplete
-                None => return Ok(None),
-            }
-        }
+            };
+        };
         // The patches then look like: vec![patch3, patch2, patch1]
         //
         // These patches are then popped off the end, applied in turn to create the desired object.
@@ -238,10 +230,10 @@ impl PackFile {
         // recreating the chain for any object along it, but this shouldn't be necessary
         // for most operations since we will only be concerned with the tip of the chain.
         while let Some(patch) = patches.pop() {
-            object = object.patch(&patch).unwrap();
+            accum = accum.patch(&patch);
             // TODO: Cache here
         }
-        Ok(Some(object.unwrap()))
+        Ok(accum)
     }
 
     fn read_at_offset(&self, offset: usize) -> Result<PackEntry> {
@@ -261,8 +253,8 @@ pub struct Objects<R> {
     remaining: usize,
     base_objects: HashMap<Sha, PackedObject>,
     base_offsets: HashMap<usize, Sha>,
-    ref_deltas: Vec<(usize, u32, PackEntry)>,
-    ofs_deltas: Vec<(usize, u32, PackEntry)>,
+    ref_deltas: Vec<(usize, u32, RefDelta)>,
+    ofs_deltas: Vec<(usize, u32, OfsDelta)>,
     resolve: bool,
 }
 
@@ -284,10 +276,10 @@ where
 
     fn resolve_ref_delta(&mut self) -> Option<(usize, u32, PackedObject)> {
         match self.ref_deltas.pop() {
-            Some((offset, checksum, PackEntry::RefDelta(base_sha, patch))) => {
+            Some((offset, checksum, delta)) => {
                 let patched = {
-                    let base_object = self.base_objects.get(&base_sha).unwrap();
-                    base_object.patch(&patch)
+                    let base_object = self.base_objects.get(&delta.base).unwrap();
+                    base_object.patch(&delta.patch)
                 };
                 {
                     let sha = patched.sha();
@@ -296,26 +288,24 @@ where
                 }
                 Some((offset, checksum, patched))
             }
-            Some(_) => unreachable!(),
             None => None,
         }
     }
 
     fn resolve_ofs_delta(&mut self) -> Option<(usize, u32, PackedObject)> {
         match self.ofs_deltas.pop() {
-            Some((offset, checksum, PackEntry::OfsDelta(base, patch))) => {
+            Some((offset, checksum, delta)) => {
                 let patched = {
-                    let base = offset - base;
+                    let base = offset - delta.offset;
                     let base_sha = self.base_offsets.get(&base).unwrap();
                     let base_object = self.base_objects.get(base_sha).unwrap();
-                    base_object.patch(&patch)
+                    base_object.patch(&delta.patch)
                 };
                 let sha = patched.sha();
                 self.base_offsets.insert(offset, sha.clone());
                 self.base_objects.insert(sha, patched.clone());
                 Some((offset, checksum, patched))
             }
-            Some(_) => unreachable!(),
             None => None,
         }
     }
@@ -338,8 +328,8 @@ where
             let checksum = object.crc32();
 
             match object {
-                PackEntry::OfsDelta(_, _) => self.ofs_deltas.push((offset, checksum, object)),
-                PackEntry::RefDelta(_, _) => self.ref_deltas.push((offset, checksum, object)),
+                PackEntry::OfsDelta(delta) => self.ofs_deltas.push((offset, checksum, delta)),
+                PackEntry::RefDelta(delta) => self.ref_deltas.push((offset, checksum, delta)),
                 PackEntry::Base(base) => {
                     {
                         let sha = base.sha();
@@ -408,7 +398,10 @@ where
             6 => {
                 let offset = self.read_offset()?;
                 let content = self.decompress_content(size)?;
-                Ok(PackEntry::OfsDelta(offset, content))
+                Ok(PackEntry::OfsDelta(OfsDelta {
+                    offset,
+                    patch: content,
+                }))
             }
             7 => {
                 let mut base_content: [u8; 20] = [0; 20];
@@ -416,7 +409,10 @@ where
                 let base = Sha::from_bytes(&base_content[..]).unwrap();
 
                 let content = self.decompress_content(size)?;
-                Ok(PackEntry::RefDelta(base, content))
+                Ok(PackEntry::RefDelta(RefDelta {
+                    base,
+                    patch: content,
+                }))
             }
             _ => return Err(anyhow!("unexpected id for git object: {}", type_id)),
         }
@@ -546,21 +542,18 @@ mod tests {
     fn reading_a_packed_object_by_offset() {
         let pack = read_pack();
         // Read a base object
-        pack.find_by_offset(BASE_OFFSET).unwrap().unwrap();
+        pack.find_by_offset(BASE_OFFSET).unwrap();
         // Read a deltified object
-        pack.find_by_offset(DELTA_OFFSET).unwrap().unwrap();
+        pack.find_by_offset(DELTA_OFFSET).unwrap();
     }
 
     #[test]
     fn reading_a_packed_object_by_sha() {
         let pack = read_pack();
         // Read a base object
-        pack.find_by_sha(&Sha::from_hex(BASE_SHA).unwrap())
-            .unwrap()
-            .unwrap();
+        pack.find_by_sha(&Sha::from_hex(BASE_SHA).unwrap()).unwrap();
         // Read a deltified object
         pack.find_by_sha(&Sha::from_hex(DELTA_SHA).unwrap())
-            .unwrap()
             .unwrap();
     }
 
@@ -570,7 +563,6 @@ mod tests {
         let pack = read_pack();
         let delta = pack
             .find_by_sha(&Sha::from_hex(DELTA_SHA).unwrap())
-            .unwrap()
             .unwrap();
         let content = str::from_utf8(&delta.content[..]).unwrap();
         assert_eq!(content, DELTA_CONTENT);

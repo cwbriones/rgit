@@ -1,7 +1,7 @@
-use anyhow::Result;
 use std::io::Write;
 use std::net::TcpStream;
 
+use anyhow::Result;
 use ssh2::Session;
 
 use super::GitClient;

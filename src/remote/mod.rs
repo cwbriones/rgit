@@ -2,6 +2,9 @@ use std::io;
 use std::io::Read;
 use std::str;
 
+use anyhow::anyhow;
+use anyhow::Result;
+
 use crate::packfile::refs::GitRef;
 
 pub mod httpclient;
@@ -9,9 +12,8 @@ pub mod sshclient;
 pub mod tcpclient;
 
 pub trait GitClient {
-    // Required Methods
-    fn discover_refs(&mut self) -> io::Result<Vec<GitRef>>;
-    fn fetch_packfile(&mut self, want: &[GitRef]) -> io::Result<Vec<u8>>;
+    fn discover_refs(&mut self) -> Result<Vec<GitRef>>;
+    fn fetch_packfile(&mut self, want: &[GitRef]) -> Result<Vec<u8>>;
 }
 
 ///
@@ -120,7 +122,7 @@ fn receive<R: Read>(reader: &mut R) -> io::Result<Vec<String>> {
 ///    2. Progress information to be printed to STDERR
 ///    3. Error message from server, abort operation
 ///
-pub fn receive_with_sideband<R: Read>(reader: &mut R) -> io::Result<Vec<u8>> {
+pub fn receive_with_sideband<R: Read>(reader: &mut R) -> Result<Vec<u8>> {
     let mut packfile_data = Vec::new();
     loop {
         match read_packet_line(reader)? {
@@ -137,15 +139,10 @@ pub fn receive_with_sideband<R: Read>(reader: &mut R) -> io::Result<Vec<u8>> {
                         }
                     }
                     2 => {
-                        let msg = str::from_utf8(&line[1..]).unwrap();
+                        let msg = str::from_utf8(&line[1..])?;
                         print!("{}", msg);
                     }
-                    _ => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            "Git server returned error",
-                        ))
-                    }
+                    _ => return Err(anyhow!("git server returned error")),
                 }
             }
             None => return Ok(packfile_data),

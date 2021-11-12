@@ -2,6 +2,8 @@ use std::io;
 use std::io::Write;
 use std::net::TcpStream;
 
+use anyhow::Result;
+
 use super::GitClient;
 use crate::packfile::refs::GitRef;
 
@@ -42,7 +44,7 @@ impl GitTcpClient {
 }
 
 impl GitClient for GitTcpClient {
-    fn discover_refs(&mut self) -> io::Result<Vec<GitRef>> {
+    fn discover_refs(&mut self) -> Result<Vec<GitRef>> {
         let payload = self.git_proto_request();
         self.stream.write_all(payload.as_bytes())?;
 
@@ -51,7 +53,7 @@ impl GitClient for GitTcpClient {
         Ok(refs)
     }
 
-    fn fetch_packfile(&mut self, want: &[GitRef]) -> io::Result<Vec<u8>> {
+    fn fetch_packfile(&mut self, want: &[GitRef]) -> Result<Vec<u8>> {
         let capabilities = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
         let request = super::create_negotiation_request(&capabilities[..], want);
         self.stream.write_all(request.as_bytes())?;

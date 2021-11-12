@@ -23,7 +23,6 @@
 //      2. Read and return
 //
 use std::fs::File;
-use std::io;
 use std::io::{
     Read,
     Write,
@@ -57,7 +56,7 @@ pub struct PackIndex {
 
 impl PackIndex {
     #[allow(unused)]
-    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Option<Self>> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Option<Self>> {
         use std::io::Error as IoError;
         use std::io::ErrorKind;
 
@@ -66,7 +65,7 @@ impl PackIndex {
             Err(io_error @ IoError { .. }) if ErrorKind::NotFound == io_error.kind() => {
                 return Ok(None)
             }
-            Err(io) => return Err(io),
+            Err(io) => return Err(io.into()),
         };
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
@@ -74,7 +73,7 @@ impl PackIndex {
     }
 
     #[allow(unused)]
-    fn parse(mut content: &[u8]) -> io::Result<Self> {
+    fn parse(mut content: &[u8]) -> Result<Self> {
         let checksum = Sha::compute_from_bytes(&content[..content.len() - 20]);
 
         // Parse header
@@ -97,7 +96,7 @@ impl PackIndex {
         for _ in 0..size {
             let mut sha = [0; 20];
             content.read_exact(&mut sha)?;
-            shas.push(Sha::from_bytes(&sha[..]).unwrap());
+            shas.push(Sha::from_bytes(&sha[..])?);
         }
 
         // Parse N Checksums
@@ -117,11 +116,11 @@ impl PackIndex {
         // Parse trailer
         let mut pack_sha_content = [0; 20];
         content.read_exact(&mut pack_sha_content)?;
-        let pack_sha = Sha::from_bytes(&pack_sha_content[..]).unwrap();
+        let pack_sha = Sha::from_bytes(&pack_sha_content[..])?;
 
         let mut idx_sha_content = [0; 20];
         content.read_exact(&mut idx_sha_content)?;
-        let idx_sha = Sha::from_bytes(&idx_sha_content[..]).unwrap();
+        let idx_sha = Sha::from_bytes(&idx_sha_content[..])?;
 
         assert_eq!(idx_sha, checksum);
 
