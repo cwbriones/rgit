@@ -1,4 +1,4 @@
-use std::io::Result as IoResult;
+use anyhow::Result;
 use std::io::Write;
 use std::net::TcpStream;
 
@@ -33,7 +33,7 @@ impl GitSSHClient {
 }
 
 impl GitClient for GitSSHClient {
-    fn discover_refs(&mut self) -> IoResult<Vec<GitRef>> {
+    fn discover_refs(&mut self) -> Result<Vec<GitRef>> {
         let mut chan = self.sess.channel_session().unwrap();
         let command = format!("git-upload-pack {}", self.repo);
         chan.exec(&command).unwrap();
@@ -43,7 +43,7 @@ impl GitClient for GitSSHClient {
         Ok(refs)
     }
 
-    fn fetch_packfile(&mut self, want: &[GitRef]) -> IoResult<Vec<u8>> {
+    fn fetch_packfile(&mut self, want: &[GitRef]) -> Result<Vec<u8>> {
         let capabilities = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
 
         // FIXME: We shouldn't have to call this command twice because then we are just

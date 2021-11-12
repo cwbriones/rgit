@@ -1,9 +1,9 @@
 // Delta encoding algorithm
 use std::fs::File;
 use std::io::Read;
-use std::io::Result as IoResult;
 use std::str as Str;
 
+use anyhow::Result;
 use byteorder::ReadBytesExt;
 
 pub fn patch(source: &[u8], delta: &[u8]) -> Vec<u8> {
@@ -11,7 +11,7 @@ pub fn patch(source: &[u8], delta: &[u8]) -> Vec<u8> {
     patcher.run_to_end()
 }
 
-pub fn patch_file(source_path: &str, delta_path: &str) -> IoResult<()> {
+pub fn patch_file(source_path: &str, delta_path: &str) -> Result<()> {
     let mut source_file = File::open(source_path)?;
     let mut source_contents = Vec::new();
 

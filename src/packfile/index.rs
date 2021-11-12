@@ -24,13 +24,13 @@
 //
 use std::fs::File;
 use std::io;
-use std::io::Result as IoResult;
 use std::io::{
     Read,
     Write,
 };
 use std::path::Path;
 
+use anyhow::Result;
 use byteorder::{
     BigEndian,
     ReadBytesExt,
@@ -138,7 +138,7 @@ impl PackIndex {
     /// Encodes the index into binary format for writing.
     ///
     #[allow(dead_code)]
-    pub fn encode(&self) -> IoResult<Vec<u8>> {
+    pub fn encode(&self) -> Result<Vec<u8>> {
         let size = self.shas.len();
         let total_size = (2 * 4) + 256 * 4 + size * 28;
         let mut buf: Vec<u8> = Vec::with_capacity(total_size);

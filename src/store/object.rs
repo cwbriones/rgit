@@ -3,7 +3,6 @@ use std::fs::{
     self,
     File,
 };
-use std::io::Result as IoResult;
 use std::io::{
     Read,
     Write,
@@ -124,7 +123,7 @@ impl PackedObject {
     /// Encodes this object and writes it to the repo's database.
     ///
     #[allow(unused)]
-    pub fn write(&self, repo: &str) -> IoResult<()> {
+    pub fn write(&self, repo: &str) -> Result<()> {
         let (sha, blob) = self.encode();
         let path = object_path(repo, &sha);
 

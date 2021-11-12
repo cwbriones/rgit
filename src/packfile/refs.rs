@@ -1,11 +1,12 @@
 use std::fs;
 use std::fs::File;
-use std::io::Result as IoResult;
 use std::io::Write;
 use std::path::{
     Path,
     PathBuf,
 };
+
+use anyhow::Result;
 
 #[derive(Debug)]
 pub struct GitRef {
@@ -13,7 +14,7 @@ pub struct GitRef {
     pub name: String,
 }
 
-pub fn create_refs(repo: &str, refs: &[GitRef]) -> IoResult<()> {
+pub fn create_refs(repo: &str, refs: &[GitRef]) -> Result<()> {
     let (tags, branches): (Vec<_>, Vec<_>) = refs
         .iter()
         .filter(|r| !r.name.ends_with("^{}"))
@@ -24,7 +25,7 @@ pub fn create_refs(repo: &str, refs: &[GitRef]) -> IoResult<()> {
     Ok(())
 }
 
-fn write_refs(repo: &str, parent_path: &str, refs: &[&GitRef]) -> IoResult<()> {
+fn write_refs(repo: &str, parent_path: &str, refs: &[&GitRef]) -> Result<()> {
     let mut path = PathBuf::new();
     path.push(parent_path);
 
@@ -37,7 +38,7 @@ fn write_refs(repo: &str, parent_path: &str, refs: &[&GitRef]) -> IoResult<()> {
     Ok(())
 }
 
-pub fn update_head(repo: &str, refs: &[GitRef]) -> IoResult<()> {
+pub fn update_head(repo: &str, refs: &[GitRef]) -> Result<()> {
     if let Some(head) = refs.iter().find(|r| r.name == "HEAD") {
         let sha1 = &head.id;
         let true_ref = refs.iter().find(|r| r.name != "HEAD" && r.id == *sha1);
@@ -51,7 +52,7 @@ pub fn update_head(repo: &str, refs: &[GitRef]) -> IoResult<()> {
 ///
 /// Creates a ref in the given repository.
 ///
-fn create_ref(repo: &str, path: &str, id: &str) -> IoResult<()> {
+fn create_ref(repo: &str, path: &str, id: &str) -> Result<()> {
     let mut full_path = PathBuf::new();
     full_path.push(repo);
     full_path.push(".git");
@@ -65,7 +66,7 @@ fn create_ref(repo: &str, path: &str, id: &str) -> IoResult<()> {
 ///
 /// Creates a symbolic ref in the given repository.
 ///
-fn create_sym_ref(repo: &str, name: &str, the_ref: &str) -> IoResult<()> {
+fn create_sym_ref(repo: &str, name: &str, the_ref: &str) -> Result<()> {
     let mut path = PathBuf::new();
     path.push(repo);
     path.push(".git");
