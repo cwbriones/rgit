@@ -1,21 +1,37 @@
-pub mod refs;
 mod index;
+pub mod refs;
+
+use std::collections::HashMap;
+use std::fs::{
+    self,
+    File,
+};
+use std::io::{
+    self,
+    BufRead,
+    Read,
+    Write,
+};
+use std::path::Path;
 
 use anyhow::{
     anyhow,
     Context,
     Result,
 };
-use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
+use byteorder::{
+    BigEndian,
+    ReadBytesExt,
+    WriteBytesExt,
+};
 use crc32fast::Hasher as CrcHasher;
 
-use std::fs::{self, File};
-use std::path::Path;
-use std::io::{self, Read, Write, BufRead};
-use std::collections::HashMap;
-
-use crate::store::{PackedObject, ObjectType, Sha};
 pub use self::index::PackIndex;
+use crate::store::{
+    ObjectType,
+    PackedObject,
+    Sha,
+};
 
 static MAGIC_HEADER: u32 = 1346454347; // "PACK"
 static HEADER_LENGTH: usize = 12; // Magic + Len + Version
@@ -48,7 +64,7 @@ impl PackEntry {
     pub fn unwrap(self) -> PackedObject {
         match self {
             PackEntry::Base(b) => b,
-            _ => panic!("Called `GitObject::unwrap` on a deltified object")
+            _ => panic!("Called `GitObject::unwrap` on a deltified object"),
         }
     }
 
@@ -104,7 +120,10 @@ impl PackFile {
             // Use slice::split_at
             contents = &contents[..contents_len - 20];
             let index = idx.unwrap_or_else(|| {
-                PackIndex::from_objects(Objects::new(contents, num_objects).collect(), &sha_computed)
+                PackIndex::from_objects(
+                    Objects::new(contents, num_objects).collect(),
+                    &sha_computed,
+                )
             });
 
             Ok(PackFile {
@@ -115,7 +134,7 @@ impl PackFile {
                 index,
             })
         } else {
-          unreachable!("Packfile failed to parse");
+            unreachable!("Packfile failed to parse");
         }
     }
 
@@ -159,7 +178,7 @@ impl PackFile {
         let off = self.index.find(sha);
         match off {
             Some(offset) => self.find_by_offset(offset),
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 
@@ -167,7 +186,7 @@ impl PackFile {
         let off = self.index.find(sha);
         match off {
             Some(offset) => Ok(Some(self.read_at_offset(offset)?)),
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 
@@ -197,17 +216,19 @@ impl PackFile {
                     // will either be offsets or shas but not both.
                     offset -= delta_offset;
                     next = Some(self.read_at_offset(offset)?);
-                },
+                }
                 PackEntry::RefDelta(sha, patch) => {
                     patches.push(patch);
                     next = self.find_by_sha_unresolved(&sha)?;
-                },
-                _ => unreachable!()
+                }
+                _ => unreachable!(),
             }
             match next {
-                Some(o) => { object = o; }
+                Some(o) => {
+                    object = o;
+                }
                 // This should be an error that the object is incomplete
-                None => return Ok(None)
+                None => return Ok(None),
             }
         }
         // The patches then look like: vec![patch3, patch2, patch1]
@@ -245,7 +266,10 @@ pub struct Objects<R> {
     resolve: bool,
 }
 
-impl<R> Objects<R> where R: Read + BufRead {
+impl<R> Objects<R>
+where
+    R: Read + BufRead,
+{
     fn new(reader: R, size: usize) -> Self {
         Objects {
             reader: EntryReader::new(reader),
@@ -254,7 +278,7 @@ impl<R> Objects<R> where R: Read + BufRead {
             base_objects: HashMap::new(),
             base_offsets: HashMap::new(),
             ofs_deltas: Vec::new(),
-            resolve: false
+            resolve: false,
         }
     }
 
@@ -271,9 +295,9 @@ impl<R> Objects<R> where R: Read + BufRead {
                     self.base_objects.insert(sha, patched.clone());
                 }
                 Some((offset, checksum, patched))
-            },
+            }
             Some(_) => unreachable!(),
-            None => None
+            None => None,
         }
     }
 
@@ -290,14 +314,17 @@ impl<R> Objects<R> where R: Read + BufRead {
                 self.base_offsets.insert(offset, sha.clone());
                 self.base_objects.insert(sha, patched.clone());
                 Some((offset, checksum, patched))
-            },
+            }
             Some(_) => unreachable!(),
-            None => None
+            None => None,
         }
     }
 }
 
-impl<R> Iterator for Objects<R> where R: Read + BufRead {
+impl<R> Iterator for Objects<R>
+where
+    R: Read + BufRead,
+{
     // (offset, crc32, Object)
     type Item = (usize, u32, PackedObject);
 
@@ -319,8 +346,8 @@ impl<R> Iterator for Objects<R> where R: Read + BufRead {
                         self.base_offsets.insert(offset, sha.clone());
                         self.base_objects.insert(sha, base.clone());
                     }
-                    return Some((offset, checksum, base))
-                },
+                    return Some((offset, checksum, base));
+                }
             }
         }
         if !self.resolve {
@@ -329,7 +356,8 @@ impl<R> Iterator for Objects<R> where R: Read + BufRead {
             self.ofs_deltas.reverse();
         }
         // Then resolve and yield all the delta objects
-        self.resolve_ref_delta().or_else(|| self.resolve_ofs_delta())
+        self.resolve_ref_delta()
+            .or_else(|| self.resolve_ofs_delta())
     }
 }
 
@@ -338,7 +366,10 @@ pub struct EntryReader<R> {
     consumed_bytes: usize,
 }
 
-impl<R> EntryReader<R> where R: Read + BufRead {
+impl<R> EntryReader<R>
+where
+    R: Read + BufRead,
+{
     pub fn new(inner: R) -> Self {
         EntryReader {
             inner,
@@ -370,15 +401,15 @@ impl<R> EntryReader<R> where R: Read + BufRead {
                     2 => ObjectType::Tree,
                     3 => ObjectType::Blob,
                     4 => ObjectType::Tag,
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 };
                 Ok(PackEntry::Base(PackedObject::new(base_type, content)))
-            },
+            }
             6 => {
                 let offset = self.read_offset()?;
                 let content = self.decompress_content(size)?;
                 Ok(PackEntry::OfsDelta(offset, content))
-            },
+            }
             7 => {
                 let mut base_content: [u8; 20] = [0; 20];
                 self.read_exact(&mut base_content)?;
@@ -387,7 +418,7 @@ impl<R> EntryReader<R> where R: Read + BufRead {
                 let content = self.decompress_content(size)?;
                 Ok(PackEntry::RefDelta(base, content))
             }
-            _ => return Err(anyhow!("unexpected id for git object: {}", type_id))
+            _ => return Err(anyhow!("unexpected id for git object: {}", type_id)),
         }
     }
 
@@ -428,9 +459,9 @@ impl<R> EntryReader<R> where R: Read + BufRead {
     fn decompress_content(&mut self, size: usize) -> Result<Vec<u8>> {
         let mut object_buffer = Vec::with_capacity(size);
 
-        use flate2::Status;
-        use flate2::Flush;
         use flate2::Decompress;
+        use flate2::Flush;
+        use flate2::Status;
 
         let mut decompressor = Decompress::new(true);
         loop {
@@ -453,7 +484,7 @@ impl<R> EntryReader<R> where R: Read + BufRead {
                         ));
                     }
                     return Ok(object_buffer);
-                },
+                }
                 // The assumption is that reaching BufError is truly an error.
                 // - Input case: The input buffer is empty. We read the buffer before every call to
                 // `decompress_vec`, so if the returned buf is empty then we have truly exhausted
@@ -469,12 +500,12 @@ impl<R> EntryReader<R> where R: Read + BufRead {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::io::Read;
     use std::fs::File;
+    use std::io::Read;
+
+    use super::*;
 
     static PACK_FILE: &'static str =
         "tests/data/packs/pack-79f006bb5e8d079fdbe07e7ce41f97f4db7d341c.pack";
@@ -515,13 +546,9 @@ mod tests {
     fn reading_a_packed_object_by_offset() {
         let pack = read_pack();
         // Read a base object
-        pack.find_by_offset(BASE_OFFSET)
-            .unwrap()
-            .unwrap();
+        pack.find_by_offset(BASE_OFFSET).unwrap().unwrap();
         // Read a deltified object
-        pack.find_by_offset(DELTA_OFFSET)
-            .unwrap()
-            .unwrap();
+        pack.find_by_offset(DELTA_OFFSET).unwrap().unwrap();
     }
 
     #[test]
@@ -541,11 +568,11 @@ mod tests {
     fn reading_delta_objects_should_resolve_them_correctly() {
         use std::str;
         let pack = read_pack();
-        let delta = pack.find_by_sha(&Sha::from_hex(DELTA_SHA).unwrap())
+        let delta = pack
+            .find_by_sha(&Sha::from_hex(DELTA_SHA).unwrap())
             .unwrap()
             .unwrap();
         let content = str::from_utf8(&delta.content[..]).unwrap();
         assert_eq!(content, DELTA_CONTENT);
     }
 }
-

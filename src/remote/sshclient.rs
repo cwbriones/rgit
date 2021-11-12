@@ -1,15 +1,15 @@
-use ssh2::Session;
-
-use std::io::Write;
 use std::io::Result as IoResult;
+use std::io::Write;
 use std::net::TcpStream;
 
-use crate::packfile::refs::GitRef;
+use ssh2::Session;
+
 use super::GitClient;
+use crate::packfile::refs::GitRef;
 
 pub struct GitSSHClient {
     sess: Session,
-    repo: String
+    repo: String,
 }
 
 impl GitSSHClient {

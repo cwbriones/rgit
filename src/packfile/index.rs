@@ -22,16 +22,23 @@
 //   Yes
 //      2. Read and return
 //
-use byteorder::{ReadBytesExt,WriteBytesExt,BigEndian};
-
-use std::io;
-use std::io::{Write,Read};
-use std::io::Result as IoResult;
 use std::fs::File;
+use std::io;
+use std::io::Result as IoResult;
+use std::io::{
+    Read,
+    Write,
+};
 use std::path::Path;
 
-use crate::store::Sha;
+use byteorder::{
+    BigEndian,
+    ReadBytesExt,
+    WriteBytesExt,
+};
+
 use crate::store::PackedObject;
+use crate::store::Sha;
 
 static MAGIC: [u8; 4] = [255, 116, 79, 99];
 static VERSION: u32 = 2;
@@ -56,7 +63,9 @@ impl PackIndex {
 
         let mut file = match File::open(path) {
             Ok(file) => file,
-            Err(io_error @ IoError{..}) if ErrorKind::NotFound == io_error.kind() => return Ok(None),
+            Err(io_error @ IoError { .. }) if ErrorKind::NotFound == io_error.kind() => {
+                return Ok(None)
+            }
             Err(io) => return Err(io),
         };
         let mut contents = Vec::new();
@@ -116,7 +125,7 @@ impl PackIndex {
 
         assert_eq!(idx_sha, checksum);
 
-        Ok(PackIndex{
+        Ok(PackIndex {
             fanout,
             offsets,
             shas,
@@ -188,9 +197,7 @@ impl PackIndex {
         let mut checksums: Vec<u32> = Vec::with_capacity(size);
 
         // Sort the objects by SHA
-        objects.sort_by(|&(_, _, ref oa), &(_, _, ref ob)| {
-            oa.sha().cmp(&ob.sha())
-        });
+        objects.sort_by(|&(_, _, ref oa), &(_, _, ref ob)| oa.sha().cmp(&ob.sha()));
 
         for &(offset, crc, ref obj) in objects.iter() {
             let sha = obj.sha();
@@ -211,18 +218,17 @@ impl PackIndex {
             offsets,
             shas,
             checksums,
-            pack_sha: pack_sha.to_owned()
+            pack_sha: pack_sha.to_owned(),
         }
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs::File;
     use std::io::Read;
 
+    use super::*;
     use crate::packfile::PackFile;
 
     static PACK_FILE: &'static str =
@@ -256,12 +262,8 @@ mod tests {
         };
 
         // FIXME: Weird, unnecessary iter/collect
-        let test_shas = pack.index.shas
-            .iter()
-            .collect::<Vec<_>>();
-        let idx_shas = index.shas
-            .iter()
-            .collect::<Vec<_>>();
+        let test_shas = pack.index.shas.iter().collect::<Vec<_>>();
+        let idx_shas = index.shas.iter().collect::<Vec<_>>();
         assert_eq!(idx_shas.len(), test_shas.len());
         assert_eq!(idx_shas, test_shas);
         let test_encoded = pack.index.encode().unwrap();
@@ -295,4 +297,3 @@ mod tests {
         assert_eq!(index.find(&bad_sha), None);
     }
 }
-

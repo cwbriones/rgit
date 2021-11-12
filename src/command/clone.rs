@@ -4,12 +4,12 @@ use anyhow::Result;
 use reqwest::Url;
 use structopt::StructOpt;
 
-use crate::remote::GitClient;
+use super::validators;
+use crate::packfile::refs;
 use crate::remote::httpclient::GitHttpClient;
 use crate::remote::tcpclient::GitTcpClient;
-use crate::packfile::refs;
+use crate::remote::GitClient;
 use crate::store::Repo;
-use super::validators;
 
 #[derive(StructOpt)]
 #[structopt(name = "clone", about = "clone a remote repository")]
@@ -46,7 +46,7 @@ impl SubcommandClone {
                     repo.push('/');
                 }
                 (Box::new(GitHttpClient::new(&repo)), dir)
-            },
+            }
             Err(_) => {
                 let client = GitTcpClient::connect(&self.repo, "127.0.0.1", 9418)?;
                 let dir = self.dir.clone().unwrap_or_else(|| self.repo.clone());

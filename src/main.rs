@@ -1,11 +1,12 @@
-use structopt::StructOpt;
 use std::process;
 
-mod remote;
-mod packfile;
-mod store;
-mod delta;
+use structopt::StructOpt;
+
 mod command;
+mod delta;
+mod packfile;
+mod remote;
+mod store;
 
 #[derive(StructOpt)]
 #[structopt(about = "a toy git implementation in rust", version = env!("CARGO_PKG_VERSION"))]
@@ -34,4 +35,3 @@ fn main() {
         process::exit(-1)
     }
 }
-

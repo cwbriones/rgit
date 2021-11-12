@@ -1,17 +1,24 @@
+use std::fmt::{
+    self,
+    Display,
+    Formatter,
+};
 use std::str;
-use std::fmt::{self, Display, Formatter};
 
 use chrono::naive::NaiveDateTime;
-use chrono::DateTime;
 use chrono::offset::FixedOffset;
-use nom::sequence;
-use nom::IResult;
-use nom::bytes::complete::{take, take_until};
+use chrono::DateTime;
+use nom::bytes::complete as bytes;
 use nom::bytes::complete::tag;
+use nom::bytes::complete::{
+    take,
+    take_until,
+};
+use nom::character::complete as character;
 use nom::combinator::map;
 use nom::combinator::map_res;
-use nom::character::complete as character;
-use nom::bytes::complete as bytes;
+use nom::sequence;
+use nom::IResult;
 
 use crate::store::PackedObject;
 use crate::store::Sha;
@@ -19,7 +26,7 @@ use crate::store::Sha;
 pub struct Person<'a> {
     name: &'a str,
     email: &'a str,
-    timestamp: DateTime<FixedOffset>
+    timestamp: DateTime<FixedOffset>,
 }
 
 pub struct Commit<'a> {
@@ -68,38 +75,26 @@ impl<'a> Display for Commit<'a> {
 }
 
 fn parse_person<'a, E>(input: &'a [u8]) -> IResult<&'a [u8], Person, E>
-    where
-        E: nom::error::ParseError<&'a [u8]>,
-        E: nom::error::FromExternalError<&'a [u8], str::Utf8Error>,
+where
+    E: nom::error::ParseError<&'a [u8]>,
+    E: nom::error::FromExternalError<&'a [u8], str::Utf8Error>,
 {
     let parts = sequence::tuple((
         map_res(
-            sequence::terminated(
-                take_until(" <"),
-                take(2usize),
-            ),
+            sequence::terminated(take_until(" <"), take(2usize)),
             str::from_utf8,
         ),
         map_res(
-            sequence::terminated(
-                take_until("> "),
-                take(2usize),
-            ),
+            sequence::terminated(take_until("> "), take(2usize)),
             str::from_utf8,
         ),
-        sequence::terminated(
-            character::i64,
-            character::char(' '),
-        ),
-        sequence::terminated(
-            character::i32,
-            character::newline,
-        ),
+        sequence::terminated(character::i64, character::char(' ')),
+        sequence::terminated(character::i32, character::newline),
     ));
     // FIXME: Why is this str and not bytes
     map(parts, |(name, email, ts, tz)| {
         let naive = NaiveDateTime::from_timestamp(ts, 0);
-        let offset = FixedOffset::east(tz/100 * 3600);
+        let offset = FixedOffset::east(tz / 100 * 3600);
         let timestamp = DateTime::from_utc(naive, offset);
         Person {
             name,
@@ -110,8 +105,8 @@ fn parse_person<'a, E>(input: &'a [u8]) -> IResult<&'a [u8], Person, E>
 }
 
 fn gpgsig<'a, E>(input: &'a [u8]) -> IResult<&'a [u8], (), E>
-    where
-        E: nom::error::ParseError<&'a [u8]>
+where
+    E: nom::error::ParseError<&'a [u8]>,
 {
     let parts = sequence::tuple((
         tag("gpgsig"),
@@ -119,24 +114,22 @@ fn gpgsig<'a, E>(input: &'a [u8]) -> IResult<&'a [u8], (), E>
             bytes::take_till1(nom::character::is_newline),
             character::newline,
         ),
-        nom::multi::many0(
-            sequence::preceded(
-                character::char(' '),
-                sequence::terminated(
-                    bytes::take_till(nom::character::is_newline),
-                    character::newline,
-                ),
-            )
-        ),
+        nom::multi::many0(sequence::preceded(
+            character::char(' '),
+            sequence::terminated(
+                bytes::take_till(nom::character::is_newline),
+                character::newline,
+            ),
+        )),
     ));
     map(parts, |_| ())(input)
 }
 
 fn parse_commit<'a, E>(input: &'a [u8], sha: Sha) -> IResult<&'a [u8], Commit<'a>, E>
-    where
-        E: nom::error::ParseError<&'a [u8]>,
-        E: nom::error::FromExternalError<&'a [u8], str::Utf8Error>,
-        E: nom::error::FromExternalError<&'a [u8], super::DecodeShaError>,
+where
+    E: nom::error::ParseError<&'a [u8]>,
+    E: nom::error::FromExternalError<&'a [u8], str::Utf8Error>,
+    E: nom::error::FromExternalError<&'a [u8], super::DecodeShaError>,
 {
     let parts = sequence::tuple((
         sequence::preceded(
@@ -146,49 +139,39 @@ fn parse_commit<'a, E>(input: &'a [u8], sha: Sha) -> IResult<&'a [u8], Commit<'a
                 // FIXME: This and parent below can use unchecked by
                 // making the parser hex-aware
                 Sha::from_hex,
-            )
+            ),
         ),
         character::newline,
-        nom::multi::many0(
-            sequence::terminated(
-                sequence::preceded(
-                    tag("parent "),
-                    map_res(
-                        bytes::take(40usize),
-                        Sha::from_hex,
-                    )
-                ),
-                character::newline,
-            )
-        ),
-        sequence::preceded(
-            tag("author "),
-            parse_person,
-        ),
-        sequence::preceded(
-            tag("committer "),
-            parse_person,
-        ),
+        nom::multi::many0(sequence::terminated(
+            sequence::preceded(tag("parent "), map_res(bytes::take(40usize), Sha::from_hex)),
+            character::newline,
+        )),
+        sequence::preceded(tag("author "), parse_person),
+        sequence::preceded(tag("committer "), parse_person),
         nom::combinator::opt(gpgsig),
         character::newline,
         map_res(nom::combinator::rest, str::from_utf8),
     ));
-    map(parts, |(tree, _, parents, author, committer, _, _, message)| {
-        Commit {
+    map(
+        parts,
+        |(tree, _, parents, author, committer, _, _, message)| Commit {
             tree,
             parents,
             author,
             committer,
             message,
             sha: sha.clone(),
-        }
-    })(input)
+        },
+    )(input)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{PackedObject, ObjectType};
+    use crate::store::{
+        ObjectType,
+        PackedObject,
+    };
 
     #[test]
     fn test_parse_person() {
@@ -213,14 +196,23 @@ mod tests {
         let sha = Sha::from_bytes(&[0u8; 20][..]).unwrap();
         match parse_commit::<nom::error::VerboseError<&[u8]>>(&input[..], sha) {
             Ok((_, commit)) => {
-                assert_eq!(commit.tree.hex(), "abdf456789012345678901234567890123456789");
-                assert_eq!(commit.parents[0].hex(), "abcdefaaa012345678901234567890123456789a");
-                assert_eq!(commit.parents[1].hex(), "abcdefbbb012345678901234567890123456789a");
+                assert_eq!(
+                    commit.tree.hex(),
+                    "abdf456789012345678901234567890123456789"
+                );
+                assert_eq!(
+                    commit.parents[0].hex(),
+                    "abcdefaaa012345678901234567890123456789a"
+                );
+                assert_eq!(
+                    commit.parents[1].hex(),
+                    "abcdefbbb012345678901234567890123456789a"
+                );
                 assert_eq!(commit.message, "Bump version to 1.6");
-            },
+            }
             Err(e) => {
                 panic!("Failed to parse commit: {}", e);
-            },
+            }
         }
 
         let object2 = PackedObject::new(ObjectType::Commit, (&input2[..]).to_owned());
@@ -239,20 +231,31 @@ mod tests {
         match parse_commit::<nom::error::VerboseError<_>>(input.as_bytes(), sha) {
             Err(nom::Err::Failure(err)) => {
                 for (ctx, e) in err.errors {
-                    panic!("Failed to parse commit: {:?}: {:?}", str::from_utf8(ctx).unwrap(), e);
+                    panic!(
+                        "Failed to parse commit: {:?}: {:?}",
+                        str::from_utf8(ctx).unwrap(),
+                        e
+                    );
                 }
-            },
+            }
             Err(nom::Err::Incomplete(_)) => {
                 panic!("Failed to parse commit: unexpected EOF");
-            },
+            }
             Err(nom::Err::Error(err)) => {
                 for (ctx, e) in err.errors {
-                    panic!("Failed to parse commit: {}: {:?}", str::from_utf8(ctx).unwrap(), e);
+                    panic!(
+                        "Failed to parse commit: {}: {:?}",
+                        str::from_utf8(ctx).unwrap(),
+                        e
+                    );
                 }
-            },
+            }
             Ok((_, commit)) => {
-                assert_eq!(commit.message, "Missed a clippy lint in rayon behind feature\n");
-            },
+                assert_eq!(
+                    commit.message,
+                    "Missed a clippy lint in rayon behind feature\n"
+                );
+            }
         }
     }
 }

@@ -1,19 +1,19 @@
 use std::str;
 use std::vec::Vec;
 
-use nom::multi;
-use nom::sequence as seq;
 use nom::bytes::complete as bytes;
 use nom::combinator::{
     map,
     map_res,
 };
+use nom::multi;
+use nom::sequence as seq;
 
 use crate::store::Sha;
 
 #[derive(Debug)]
 pub struct Tree {
-    pub entries: Vec<TreeEntry>
+    pub entries: Vec<TreeEntry>,
 }
 
 #[derive(Debug)]
@@ -29,13 +29,13 @@ pub enum EntryMode {
     Executable,
     Symlink,
     Gitlink,
-    SubDirectory
+    SubDirectory,
 }
 
 impl Tree {
     pub fn parse(content: &[u8]) -> Option<Self> {
         if let Ok((_, entries)) = parse_tree(content) {
-            Some(Tree { entries } )
+            Some(Tree { entries })
         } else {
             None
         }
@@ -83,41 +83,33 @@ where
 
 fn parse_tree_entry(input: &[u8]) -> nom::IResult<&[u8], TreeEntry> {
     let parts = seq::tuple((
-        map_res(
-            take_until_and_consume(" "),
-            EntryMode::try_from,
-        ),
-        map_res(
-            take_until_and_consume("\0"),
-            str::from_utf8,
-        ),
-        map_res(
-            bytes::take(20usize),
-            Sha::from_bytes,
-        ),
+        map_res(take_until_and_consume(" "), EntryMode::try_from),
+        map_res(take_until_and_consume("\0"), str::from_utf8),
+        map_res(bytes::take(20usize), Sha::from_bytes),
     ));
-    map(parts, |(mode, path, sha)| {
-        TreeEntry {
-            mode,
-            path: path.to_string(),
-            sha,
-        }
+    map(parts, |(mode, path, sha)| TreeEntry {
+        mode,
+        path: path.to_string(),
+        sha,
     })(input)
 }
 
 #[test]
 fn test_parse_tree() {
     // The raw contents of a tree object.
-    let input = [49, 48, 48, 54, 52, 52, 32, 46, 103, 105, 116, 105, 103, 110, 111, 114, 101, 0, 79,
-        255, 178, 248, 156, 189, 143, 33, 105, 206, 153, 20, 189, 22, 189, 67, 120, 91, 179, 104, 49,
-        48, 48, 54, 52, 52, 32, 67, 97, 114, 103, 111, 46, 116, 111, 109, 108, 0, 226, 11, 220, 57, 
-        33, 62, 223, 169, 46, 80, 98, 15, 155, 24, 209, 88, 234, 228, 138, 99, 49, 48, 48, 54, 52, 52,
-        32, 82, 69, 65, 68, 77, 69, 46, 109, 100, 0, 189, 6, 31, 50, 207, 237, 81, 181, 168, 222, 145,
-        109, 134, 186, 137, 235, 159, 208, 104, 242, 52, 48, 48, 48, 48, 32, 115, 114, 99, 0, 44, 153,
-        32, 248, 175, 44, 114, 130, 179, 183, 191, 144, 34, 196, 7, 92, 15, 177, 105, 86];
+    let input = [
+        49, 48, 48, 54, 52, 52, 32, 46, 103, 105, 116, 105, 103, 110, 111, 114, 101, 0, 79, 255,
+        178, 248, 156, 189, 143, 33, 105, 206, 153, 20, 189, 22, 189, 67, 120, 91, 179, 104, 49,
+        48, 48, 54, 52, 52, 32, 67, 97, 114, 103, 111, 46, 116, 111, 109, 108, 0, 226, 11, 220, 57,
+        33, 62, 223, 169, 46, 80, 98, 15, 155, 24, 209, 88, 234, 228, 138, 99, 49, 48, 48, 54, 52,
+        52, 32, 82, 69, 65, 68, 77, 69, 46, 109, 100, 0, 189, 6, 31, 50, 207, 237, 81, 181, 168,
+        222, 145, 109, 134, 186, 137, 235, 159, 208, 104, 242, 52, 48, 48, 48, 48, 32, 115, 114,
+        99, 0, 44, 153, 32, 248, 175, 44, 114, 130, 179, 183, 191, 144, 34, 196, 7, 92, 15, 177,
+        105, 86,
+    ];
     println!("{:?}", String::from_utf8_lossy(&input));
     match parse_tree(&input) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => panic!("Failed to parse tree: {}", e),
     }
 }

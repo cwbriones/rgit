@@ -1,10 +1,16 @@
-use anyhow::{Context, Result};
+use anyhow::{
+    Context,
+    Result,
+};
 use structopt::StructOpt;
 
 use crate::delta;
 
 #[derive(StructOpt)]
-#[structopt(name = "test-delta", about = "reconstruct an object given a source and a delta")]
+#[structopt(
+    name = "test-delta",
+    about = "reconstruct an object given a source and a delta"
+)]
 pub struct SubCommandTestDelta {
     source: String,
     delta: String,

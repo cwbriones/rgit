@@ -1,8 +1,11 @@
-use std::io::Result as IoResult;
-use std::io::Write;
 use std::fs;
 use std::fs::File;
-use std::path::{Path,PathBuf};
+use std::io::Result as IoResult;
+use std::io::Write;
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 #[derive(Debug)]
 pub struct GitRef {
@@ -11,11 +14,10 @@ pub struct GitRef {
 }
 
 pub fn create_refs(repo: &str, refs: &[GitRef]) -> IoResult<()> {
-    let (tags, branches): (Vec<_>, Vec<_>) = refs.iter()
+    let (tags, branches): (Vec<_>, Vec<_>) = refs
+        .iter()
         .filter(|r| !r.name.ends_with("^{}"))
-        .partition(|r| {
-            r.name.starts_with("refs/tags")
-        });
+        .partition(|r| r.name.starts_with("refs/tags"));
 
     write_refs(repo, "refs/remotes/origin", &branches)?;
     write_refs(repo, "refs/tags", &tags)?;
@@ -39,8 +41,7 @@ pub fn update_head(repo: &str, refs: &[GitRef]) -> IoResult<()> {
     if let Some(head) = refs.iter().find(|r| r.name == "HEAD") {
         let sha1 = &head.id;
         let true_ref = refs.iter().find(|r| r.name != "HEAD" && r.id == *sha1);
-        let dir = true_ref
-            .map_or("refs/heads/master", |r| &r.name[..]);
+        let dir = true_ref.map_or("refs/heads/master", |r| &r.name[..]);
         create_ref(repo, dir, sha1)?;
         create_sym_ref(repo, "HEAD", dir)?;
     }

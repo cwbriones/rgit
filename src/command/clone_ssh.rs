@@ -1,9 +1,9 @@
 use anyhow::Result;
 use structopt::StructOpt;
 
-use crate::remote::GitClient;
-use crate::remote::sshclient::GitSSHClient;
 use crate::packfile::refs;
+use crate::remote::sshclient::GitSSHClient;
+use crate::remote::GitClient;
 use crate::store::Repo;
 
 #[derive(StructOpt)]
@@ -14,11 +14,9 @@ pub struct SubCommandCloneSsh {
     user: String,
 }
 
-
 impl SubCommandCloneSsh {
     pub fn execute(self) -> Result<()> {
-        let dir = self.repo.split('.')
-            .next().unwrap();
+        let dir = self.repo.split('.').next().unwrap();
         let full_repo = [&self.user, "/", &self.repo].join("");
         let mut client = GitSSHClient::new(&self.host, &full_repo);
 

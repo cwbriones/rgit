@@ -1,12 +1,15 @@
 use anyhow::Result;
 use structopt::StructOpt;
 
-use crate::remote::GitClient;
-use crate::remote::sshclient::GitSSHClient;
 use crate::packfile::refs::GitRef;
+use crate::remote::sshclient::GitSSHClient;
+use crate::remote::GitClient;
 
 #[derive(StructOpt)]
-#[structopt(name = "ls-remote-ssh", about = "list available refs in a remote repository, over ssh")]
+#[structopt(
+    name = "ls-remote-ssh",
+    about = "list available refs in a remote repository, over ssh"
+)]
 pub struct SubcommandListRemoteSsh {
     host: String,
     repo: String,
@@ -22,7 +25,7 @@ impl SubcommandListRemoteSsh {
         let mut client = GitSSHClient::new(&self.host, &full_repo);
         let pktlines = client.discover_refs()?;
         for p in &pktlines {
-            let &GitRef{ref id, ref name} = p;
+            let &GitRef { ref id, ref name } = p;
             println!("{}\t{}", id, name);
         }
         Ok(())

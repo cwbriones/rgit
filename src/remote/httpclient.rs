@@ -1,10 +1,10 @@
 use std::io;
 use std::io::Read;
 
-use reqwest::Url;
-use reqwest::IntoUrl;
 use reqwest::blocking::Client;
 use reqwest::redirect;
+use reqwest::IntoUrl;
+use reqwest::Url;
 
 use super::GitClient;
 use crate::packfile::refs::GitRef;
@@ -19,7 +19,8 @@ const UPLOAD_PACK_ENDPOINT: &str = "git-upload-pack";
 
 impl GitHttpClient {
     pub fn new<U>(u: U) -> Self
-        where U: IntoUrl,
+    where
+        U: IntoUrl,
     {
         let mut url = u.into_url().unwrap();
         // TODO: I think the initial redirect is consuming the http post body when
@@ -36,14 +37,11 @@ impl GitHttpClient {
 }
 
 impl GitClient for GitHttpClient {
-
     fn discover_refs(&mut self) -> io::Result<Vec<GitRef>> {
         let mut discovery_url = self.url.join(REF_DISCOVERY_ENDPOINT).unwrap();
         discovery_url.set_query(Some("service=git-upload-pack"));
 
-        let mut res = self.client.get(discovery_url)
-            .send()
-            .unwrap();
+        let mut res = self.client.get(discovery_url).send().unwrap();
 
         // The server first sends a header to verify the service is correct
         let first = super::read_packet_line(&mut res)?.unwrap();
@@ -65,10 +63,7 @@ impl GitClient for GitHttpClient {
         let body = super::create_negotiation_request(&capabilities, want);
         let pack_endpoint = self.url.join(UPLOAD_PACK_ENDPOINT).unwrap();
 
-        let mut res = self.client.post(pack_endpoint)
-            .body(body)
-            .send()
-            .unwrap();
+        let mut res = self.client.post(pack_endpoint).body(body).send().unwrap();
 
         super::receive_with_sideband(&mut res)
     }

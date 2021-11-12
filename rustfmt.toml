@@ -1,0 +1,18 @@
+max_width = 100
+
+#==================
+# unstable options
+#==================
+
+group_imports = "StdExternalCrate"
+imports_layout = "Vertical"
+
+# Acceptable for simple expressions but waiting on width limits.
+# https://github.com/rust-lang/rustfmt/issues/3358
+# fn_single_line = true
+
+# Attribute was not carried over when rustfmt was extracted
+# from the rust-lang/rust repository.
+#
+# https://github.com/rust-lang/rustfmt/pull/4040
+# space_around_attr_eq = false

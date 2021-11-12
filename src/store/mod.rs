@@ -1,27 +1,42 @@
 mod commit;
-mod tree;
 mod object;
-
-pub use crate::store::object::PackedObject;
-pub use crate::store::object::ObjectType;
+mod tree;
 
 use std::env;
-use std::fs::{self, File};
-use std::os::unix::fs::PermissionsExt;
-use std::io::{self, Read,Write};
-use std::path::{Path,PathBuf};
-use std::os::unix::fs::MetadataExt;
+use std::fs::{
+    self,
+    File,
+};
+use std::io::{
+    self,
+    Read,
+    Write,
+};
 use std::iter::FromIterator;
+use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
-use byteorder::{BigEndian, WriteBytesExt};
+use byteorder::{
+    BigEndian,
+    WriteBytesExt,
+};
 
-use crate::packfile::PackFile;
-
-use self::tree::{Tree,TreeEntry,EntryMode};
 use self::commit::Commit;
+use self::tree::{
+    EntryMode,
+    Tree,
+    TreeEntry,
+};
+use crate::packfile::PackFile;
+pub use crate::store::object::ObjectType;
+pub use crate::store::object::PackedObject;
 
 #[derive(Debug, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Sha {
@@ -34,8 +49,7 @@ pub enum DecodeShaError {
     InvalidLength(usize),
 }
 
-impl std::error::Error for DecodeShaError {
-}
+impl std::error::Error for DecodeShaError {}
 
 impl std::fmt::Display for DecodeShaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -61,18 +75,16 @@ impl Sha {
 
         let mut contents = [0u8; 20];
         if hex.len() != 40 {
-            return Err(DecodeShaError::InvalidLength(hex.len()))
+            return Err(DecodeShaError::InvalidLength(hex.len()));
         }
         hex_decode(hex, &mut contents)?;
-        Ok(Self {
-            contents,
-        })
+        Ok(Self { contents })
     }
 
     pub fn compute_from_bytes(bytes: &[u8]) -> Self {
         use sha1::{
-            Sha1,
             Digest,
+            Sha1,
         };
 
         let contents: [u8; 20] = Sha1::digest(bytes).into();
@@ -82,13 +94,11 @@ impl Sha {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeShaError> {
         if bytes.len() != 20 {
-            return Err(DecodeShaError::InvalidLength(bytes.len()))
+            return Err(DecodeShaError::InvalidLength(bytes.len()));
         }
         let mut contents = [0u8; 20];
         contents.copy_from_slice(bytes);
-        Ok(Self {
-            contents,
-        })
+        Ok(Self { contents })
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -173,23 +183,20 @@ impl Repo {
         let tip = resolve_ref(&self.dir, "HEAD")?;
         let mut idx = Vec::new();
         // FIXME: This should also "bubble up" errors, walk needs to return a result.
-        self.walk(&tip).and_then(|t| self.walk_tree(&self.dir, &t, &mut idx).ok());
+        self.walk(&tip)
+            .and_then(|t| self.walk_tree(&self.dir, &t, &mut idx).ok());
         write_index(&self.dir, &mut idx[..])?;
         Ok(())
     }
 
     pub fn walk(&self, sha: &Sha) -> Option<Tree> {
-        self.read_object(sha).ok().and_then(|object| {
-            match object.obj_type {
-                ObjectType::Commit => {
-                    object.as_commit().and_then(|c| self.extract_tree(&c))
-                },
-                ObjectType::Tree => {
-                    object.as_tree()
-                },
-                _ => None
-            }
-        })
+        self.read_object(sha)
+            .ok()
+            .and_then(|object| match object.obj_type {
+                ObjectType::Commit => object.as_commit().and_then(|c| self.extract_tree(&c)),
+                ObjectType::Tree => object.as_tree(),
+                _ => None,
+            })
     }
 
     fn walk_tree(&self, parent: &str, tree: &Tree, idx: &mut Vec<IndexEntry>) -> Result<()> {
@@ -197,7 +204,7 @@ impl Repo {
             let &TreeEntry {
                 ref path,
                 ref mode,
-                ref sha
+                ref sha,
             } = entry;
             let mut full_path = PathBuf::new();
             full_path.push(parent);
@@ -206,10 +213,9 @@ impl Repo {
                 EntryMode::SubDirectory => {
                     fs::create_dir_all(&full_path)?;
                     let path_str = full_path.to_str().unwrap();
-                    self.walk(sha).and_then(|t| {
-                        self.walk_tree(path_str, &t, idx).ok()
-                    });
-                },
+                    self.walk(sha)
+                        .and_then(|t| self.walk_tree(path_str, &t, idx).ok());
+                }
                 EntryMode::Normal | EntryMode::Executable => {
                     let object = self.read_object(sha)?;
                     let mut file = File::create(&full_path)?;
@@ -219,21 +225,16 @@ impl Repo {
 
                     let raw_mode = match *mode {
                         EntryMode::Normal => 33188,
-                        _ => 33261
+                        _ => 33261,
                     };
                     perms.set_mode(raw_mode);
                     fs::set_permissions(&full_path, perms)?;
 
-                    let idx_entry = get_index_entry(
-                        &self.dir,
-                        full_path.to_str().unwrap(),
-                        mode.clone(),
-                        sha)?;
+                    let idx_entry =
+                        get_index_entry(&self.dir, full_path.to_str().unwrap(), mode.clone(), sha)?;
                     idx.push(idx_entry);
-                },
-                e => {
-                    return Err(anyhow!("Unsupported Entry Mode {:?}", e))
                 }
+                e => return Err(anyhow!("Unsupported Entry Mode {:?}", e)),
             }
         }
         Ok(())
@@ -245,9 +246,7 @@ impl Repo {
     }
 
     fn read_tree(&self, sha: &Sha) -> Option<Tree> {
-        self.read_object(sha).ok().and_then(|obj| {
-            obj.as_tree()
-        })
+        self.read_object(sha).ok().and_then(|obj| obj.as_tree())
     }
 
     pub fn read_object(&self, sha: &Sha) -> Result<PackedObject> {
@@ -263,7 +262,9 @@ impl Repo {
         let mut sha = resolve_ref(&self.dir, rev)?;
         loop {
             let object = self.read_object(&sha)?;
-            let commit = object.as_commit().expect("Tried to log an object that wasn't a commit");
+            let commit = object
+                .as_commit()
+                .expect("Tried to log an object that wasn't a commit");
             println!("{}", commit);
             if commit.parents.is_empty() {
                 break;
@@ -299,7 +300,6 @@ fn is_hex_sha(id: &str) -> bool {
     id.len() == 40 && id.chars().all(|c| c.is_digit(16))
 }
 
-
 ///
 /// Reads the symbolic ref and resolve it to the actual ref it represents.
 ///
@@ -324,10 +324,7 @@ fn read_sym_ref(repo: &str, name: &str) -> Result<Sha> {
     file.read_to_string(&mut contents)?;
 
     if contents.starts_with("ref: ") {
-        let the_ref = contents.split("ref: ")
-            .nth(1)
-            .unwrap()
-            .trim();
+        let the_ref = contents.split("ref: ").nth(1).unwrap().trim();
         resolve_ref(repo, the_ref)
     } else {
         let trimmed = contents.trim();
@@ -348,7 +345,7 @@ struct IndexEntry {
     size: i64,
     sha: Sha,
     file_mode: EntryMode,
-    path: String
+    path: String,
 }
 
 // FIXME:
@@ -359,10 +356,7 @@ fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> R
 
     // We need to remove the repo path from the path we save on the index entry
     // FIXME: This doesn't need to be a path since we just discard it again
-    let relative_path = PathBuf::from(
-            path.trim_start_matches(root)
-                .trim_start_matches('/')
-        );
+    let relative_path = PathBuf::from(path.trim_start_matches(root).trim_start_matches('/'));
 
     Ok(IndexEntry {
         ctime: meta.ctime(),
@@ -393,8 +387,8 @@ fn write_index(repo: &str, entries: &mut [IndexEntry]) -> Result<()> {
 fn encode_index(idx: &mut [IndexEntry]) -> Result<Vec<u8>> {
     let mut encoded = index_header(idx.len())?;
     idx.sort_by(|a, b| a.path.cmp(&b.path));
-    let entries =
-        idx.iter()
+    let entries = idx
+        .iter()
         .map(|e| encode_entry(e))
         .collect::<Result<Vec<_>, _>>()?;
     let mut encoded_entries = entries.concat();
@@ -414,19 +408,21 @@ fn encode_entry(entry: &IndexEntry) -> Result<Vec<u8>> {
         mode,
         uid,
         gid,
-        size
-    , ..} = entry;
+        size,
+        ..
+    } = entry;
     let &IndexEntry {
         ref sha,
         ref file_mode,
-        ref path
-    , ..} = entry;
+        ref path,
+        ..
+    } = entry;
     let flags = (path.len() & 0xFFF) as u16;
     let (encoded_type, perms) = match *file_mode {
         EntryMode::Normal | EntryMode::Executable => (8u32, mode as u32),
         EntryMode::Symlink => (10u32, 0u32),
         EntryMode::Gitlink => (14u32, 0u32),
-        _ => unreachable!("Tried to create an index entry for a non-indexable object")
+        _ => unreachable!("Tried to create an index entry for a non-indexable object"),
     };
     let encoded_mode = (encoded_type << 12) | perms;
 

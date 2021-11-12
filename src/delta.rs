@@ -1,7 +1,7 @@
 // Delta encoding algorithm
+use std::fs::File;
 use std::io::Read;
 use std::io::Result as IoResult;
-use std::fs::File;
 use std::str as Str;
 
 use byteorder::ReadBytesExt;
@@ -64,7 +64,7 @@ impl DeltaHeader {
 #[derive(Debug)]
 enum DeltaOp {
     Insert(usize),
-    Copy(usize, usize)
+    Copy(usize, usize),
 }
 
 struct DeltaPatcher<'a> {
@@ -81,7 +81,7 @@ impl<'a> DeltaPatcher<'a> {
         DeltaPatcher {
             source,
             delta,
-            target_len: header.target_len
+            target_len: header.target_len,
         }
     }
 
@@ -135,7 +135,7 @@ impl<'a> DeltaPatcher<'a> {
         match command {
             DeltaOp::Copy(start, length) => {
                 buf.extend_from_slice(&self.source[start..start + length]);
-            },
+            }
             DeltaOp::Insert(length) => {
                 buf.extend_from_slice(&self.delta[..length]);
                 self.delta = &self.delta[length..];

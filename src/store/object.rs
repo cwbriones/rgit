@@ -1,30 +1,36 @@
+use std::cell::RefCell;
+use std::fs::{
+    self,
+    File,
+};
+use std::io::Result as IoResult;
+use std::io::{
+    Read,
+    Write,
+};
+use std::path::PathBuf;
+use std::str;
+
 use anyhow::anyhow;
 use anyhow::Result;
-use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
+use flate2::Compression;
 
-use std::str;
-use std::fs::{self,File};
-use std::io::Result as IoResult;
-use std::io::{Read,Write};
-use std::path::PathBuf;
-use std::cell::RefCell;
-
-use crate::store::Sha;
+use crate::delta;
 use crate::store::commit::Commit;
 use crate::store::tree::Tree;
-use crate::delta;
+use crate::store::Sha;
 
 ///
 /// A type of loose object found in the database.
 ///
-#[derive(Debug,Copy,Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum ObjectType {
     Tree,
     Commit,
     Tag,
-    Blob
+    Blob,
 }
 
 ///
@@ -34,7 +40,7 @@ pub enum ObjectType {
 pub struct PackedObject {
     pub obj_type: ObjectType,
     pub content: Vec<u8>,
-    sha: RefCell<Option<Sha>>
+    sha: RefCell<Option<Sha>>,
 }
 
 impl PackedObject {
@@ -42,7 +48,7 @@ impl PackedObject {
         PackedObject {
             obj_type,
             content,
-            sha: RefCell::new(None)
+            sha: RefCell::new(None),
         }
     }
 
@@ -50,7 +56,7 @@ impl PackedObject {
         PackedObject {
             obj_type: self.obj_type,
             content: delta::patch(&self.content, patch),
-            sha: RefCell::new(None)
+            sha: RefCell::new(None),
         }
     }
 
@@ -63,7 +69,8 @@ impl PackedObject {
         let mut inflated = Vec::new();
         let file = File::open(path)?;
         let mut z = ZlibDecoder::new(file);
-        z.read_to_end(&mut inflated).expect("Error inflating object");
+        z.read_to_end(&mut inflated)
+            .expect("Error inflating object");
 
         let sha1_checksum = Sha::compute_from_bytes(&inflated);
         assert_eq!(&sha1_checksum, sha);
@@ -75,7 +82,7 @@ impl PackedObject {
         };
 
         let mut footer = Vec::new();
-        footer.extend_from_slice(&inflated[split_idx+1..]);
+        footer.extend_from_slice(&inflated[split_idx + 1..]);
 
         assert_eq!(footer.len(), size);
 
@@ -105,7 +112,7 @@ impl PackedObject {
         {
             let mut cache = self.sha.borrow_mut();
             if cache.is_some() {
-                return cache.as_ref().unwrap().clone()
+                return cache.as_ref().unwrap().clone();
             }
             let (hash, _) = self.encode();
             *cache = Some(hash);
@@ -140,7 +147,7 @@ impl PackedObject {
             "tree" => ObjectType::Tree,
             "blob" => ObjectType::Blob,
             "tag" => ObjectType::Tag,
-            _ => Err(anyhow!("unknown object type: {}", t))?
+            _ => Err(anyhow!("unknown object type: {}", t))?,
         };
         let size = s.parse::<usize>().unwrap();
         Ok((obj_type, size))
@@ -153,7 +160,7 @@ impl PackedObject {
             ObjectType::Commit => "commit",
             ObjectType::Tree => "tree",
             ObjectType::Blob => "blob",
-            ObjectType::Tag => "tag"
+            ObjectType::Tag => "tag",
         };
         let str_size = self.content.len().to_string();
         let res: String = [str_type, " ", &str_size[..], "\0"].concat();
@@ -196,4 +203,3 @@ fn object_path(repo: &str, sha: &Sha) -> PathBuf {
     path.push(&hex_sha[2..40]);
     path
 }
-

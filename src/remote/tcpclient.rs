@@ -2,9 +2,8 @@ use std::io;
 use std::io::Write;
 use std::net::TcpStream;
 
-use crate::packfile::refs::GitRef;
-
 use super::GitClient;
+use crate::packfile::refs::GitRef;
 
 pub struct GitTcpClient {
     stream: TcpStream,
@@ -18,11 +17,11 @@ impl GitTcpClient {
     #[allow(dead_code)]
     pub fn connect(repo: &str, host: &str, port: u16) -> io::Result<Self> {
         let stream = TcpStream::connect((host, port))?;
-        Ok(GitTcpClient{
+        Ok(GitTcpClient {
             repo: repo.to_owned(),
             stream,
             host: host.to_owned(),
-            _port: port
+            _port: port,
         })
     }
 
@@ -30,7 +29,14 @@ impl GitTcpClient {
     /// Creates the proto request needed to initiate a connection
     ///
     fn git_proto_request(&self) -> String {
-        let s: String = ["git-upload-pack /", &self.repo[..], "\0host=", &self.host[..], "\0"].concat();
+        let s: String = [
+            "git-upload-pack /",
+            &self.repo[..],
+            "\0host=",
+            &self.host[..],
+            "\0",
+        ]
+        .concat();
         super::pktline(&s[..])
     }
 }
