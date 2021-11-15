@@ -92,6 +92,12 @@ impl Sha {
         Self { contents }
     }
 
+    pub fn from_array(bytes: &[u8; 20]) -> Self {
+        Self {
+            contents: bytes.clone(),
+        }
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeShaError> {
         if bytes.len() != 20 {
             return Err(DecodeShaError::InvalidLength(bytes.len()));
@@ -185,7 +191,8 @@ impl Repo {
         // FIXME: This should also "bubble up" errors, walk needs to return a result.
         self.walk(&tip)
             .and_then(|t| self.walk_tree(&self.dir, &t, &mut idx).ok());
-        write_index(&self.dir, &mut idx[..])?;
+        let mut idx = Index::new(idx);
+        write_index(&self.dir, &mut idx)?;
         Ok(())
     }
 
@@ -265,7 +272,6 @@ impl Repo {
             let commit = object
                 .as_commit()
                 .expect("Tried to log an object that wasn't a commit");
-            println!("{}", commit);
             if commit.parents.is_empty() {
                 break;
             }
@@ -333,10 +339,41 @@ fn read_sym_ref(repo: &str, name: &str) -> Result<Sha> {
     }
 }
 
-#[derive(Debug)]
-struct IndexEntry {
-    ctime: i64,
-    mtime: i64,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Index {
+    entries: Vec<IndexEntry>,
+    extensions: Vec<IndexExtension>,
+}
+
+impl Index {
+    fn new(entries: Vec<IndexEntry>) -> Self {
+        Self::new_with_extensions(entries, Vec::new())
+    }
+
+    fn new_with_extensions(entries: Vec<IndexEntry>, extensions: Vec<IndexExtension>) -> Self {
+        Self {
+            entries,
+            extensions,
+        }
+    }
+
+    fn entries(&self) -> &[IndexEntry] {
+        &self.entries[..]
+    }
+
+    fn entries_mut(&mut self) -> &mut [IndexEntry] {
+        &mut self.entries[..]
+    }
+
+    fn extensions(&self) -> &[IndexExtension] {
+        &self.extensions[..]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexEntry {
+    ctime: GitTime,
+    mtime: GitTime,
     device: i32,
     inode: u64,
     mode: u16,
@@ -346,6 +383,34 @@ struct IndexEntry {
     sha: Sha,
     file_mode: EntryMode,
     path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IndexExtension {
+    sig: [u8; 4],
+    contents: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GitTime {
+    pub secs: u32,
+    pub nanos: u32,
+}
+
+impl GitTime {
+    pub fn new(secs: u32, nsecs: u32) -> Self {
+        GitTime { secs, nanos: nsecs }
+    }
+
+    pub fn from_epoch_ns(ns: u64) -> Self {
+        let secs = ns / 1_000_000_000;
+        // I think I can just do a normal cast and it will truncate
+        let nsecs = (ns - (secs * 1_000_000_000)) & (u32::MAX as u64);
+        GitTime {
+            secs: secs as u32,
+            nanos: nsecs as u32,
+        }
+    }
 }
 
 // FIXME:
@@ -358,9 +423,24 @@ fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> R
     // FIXME: This doesn't need to be a path since we just discard it again
     let relative_path = PathBuf::from(path.trim_start_matches(root).trim_start_matches('/'));
 
+    let ctime = {
+        let ctime_nsec = meta.ctime_nsec();
+        if ctime_nsec < 0 {
+            return Err(anyhow!("time before the epoch is unsupported"));
+        }
+        GitTime::from_epoch_ns(ctime_nsec as u64)
+    };
+    let mtime = {
+        let mtime_nsec = meta.mtime_nsec();
+        if mtime_nsec < 0 {
+            return Err(anyhow!("time before the epoch is unsupported"));
+        }
+        GitTime::from_epoch_ns(mtime_nsec as u64)
+    };
+
     Ok(IndexEntry {
-        ctime: meta.ctime(),
-        mtime: meta.mtime(),
+        ctime,
+        mtime,
         device: meta.dev() as i32,
         inode: meta.ino(),
         mode: meta.mode() as u16,
@@ -373,26 +453,34 @@ fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> R
     })
 }
 
-fn write_index(repo: &str, entries: &mut [IndexEntry]) -> Result<()> {
+fn write_index(repo: &str, index: &mut Index) -> Result<()> {
     let mut path = PathBuf::new();
     path.push(repo);
     path.push(".git");
     path.push("index");
     let mut idx_file = File::create(path)?;
-    let encoded = encode_index(entries)?;
+    let encoded = encode_index(index)?;
     idx_file.write_all(&encoded[..])?;
     Ok(())
 }
 
-fn encode_index(idx: &mut [IndexEntry]) -> Result<Vec<u8>> {
-    let mut encoded = index_header(idx.len())?;
-    idx.sort_by(|a, b| a.path.cmp(&b.path));
+fn encode_index(idx: &mut Index) -> Result<Vec<u8>> {
+    let mut encoded = index_header(idx.entries().len())?;
+    idx.entries_mut().sort_by(|a, b| a.path.cmp(&b.path));
     let entries = idx
+        .entries()
         .iter()
         .map(|e| encode_entry(e))
         .collect::<Result<Vec<_>, _>>()?;
     let mut encoded_entries = entries.concat();
     encoded.append(&mut encoded_entries);
+
+    for ext in idx.extensions() {
+        encoded.extend_from_slice(&ext.sig[..]);
+        encoded.write_u32::<BigEndian>(ext.contents.len() as u32)?;
+        encoded.extend_from_slice(&ext.contents[..]);
+    }
+
     let sha = Sha::compute_from_bytes(&encoded);
     encoded.extend_from_slice(sha.as_bytes());
     Ok(encoded)
@@ -443,10 +531,10 @@ fn encode_entry(entry: &IndexEntry) -> Result<Vec<u8>> {
         v
     };
 
-    buf.write_u32::<BigEndian>(ctime as u32)?;
-    buf.write_u32::<BigEndian>(0u32)?;
-    buf.write_u32::<BigEndian>(mtime as u32)?;
-    buf.write_u32::<BigEndian>(0u32)?;
+    buf.write_u32::<BigEndian>(ctime.secs)?;
+    buf.write_u32::<BigEndian>(ctime.nanos)?;
+    buf.write_u32::<BigEndian>(mtime.secs)?;
+    buf.write_u32::<BigEndian>(mtime.nanos)?;
     buf.write_u32::<BigEndian>(device as u32)?;
     buf.write_u32::<BigEndian>(inode as u32)?;
     buf.write_u32::<BigEndian>(encoded_mode)?;
@@ -459,12 +547,309 @@ fn encode_entry(entry: &IndexEntry) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+const GIT_INDEX_MAGIC: u32 = 1145655875; // "DIRC"
+const GIT_INDEX_VERSION: u32 = 2;
+
 fn index_header(num_entries: usize) -> io::Result<Vec<u8>> {
     let mut header = Vec::with_capacity(12);
-    let magic = 1145655875; // "DIRC"
-    let version: u32 = 2;
-    header.write_u32::<BigEndian>(magic)?;
-    header.write_u32::<BigEndian>(version)?;
+    header.write_u32::<BigEndian>(GIT_INDEX_MAGIC)?;
+    header.write_u32::<BigEndian>(GIT_INDEX_VERSION)?;
     header.write_u32::<BigEndian>(num_entries as u32)?;
     Ok(header)
+}
+
+use std::io::BufRead;
+use std::io::Seek;
+
+use byteorder::ReadBytesExt;
+
+#[allow(unused)]
+pub fn read_index<R: BufRead + Seek>(mut r: R) -> Result<Index> {
+    let mut r = DigestReader::new(r);
+
+    // Header
+    let magic = r.read_u32::<BigEndian>()?;
+    if magic != GIT_INDEX_MAGIC {
+        return Err(anyhow!("index header magic number mismatch"));
+    }
+    let version = r.read_u32::<BigEndian>()?;
+    if version != GIT_INDEX_VERSION {
+        return Err(anyhow!("unsupported index version: {}", version));
+    }
+    let num_entries = r.read_u32::<BigEndian>()?;
+
+    let mut entries = Vec::with_capacity(num_entries as usize);
+    for _ in 0..num_entries {
+        entries.push(read_entry(r.by_ref())?);
+    }
+    // Try to read extensions while we can
+    let mut extensions = Vec::new();
+    loop {
+        match read_extension(r.by_ref())? {
+            Some(ext) => extensions.push(ext),
+            None => break,
+        }
+    }
+    let mut checksum = [0u8; 20];
+    r.read_exact(&mut checksum[..])?;
+
+    match r.read_u8() {
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {}
+        _ => return Err(anyhow!("expected EOF")),
+    }
+    let sha = r.finalize();
+    if sha.as_bytes() == &checksum[..] {
+        Err(anyhow!("trailing checksum mismatch"))
+    } else {
+        Ok(Index::new_with_extensions(entries, extensions))
+    }
+}
+
+fn read_extension<R: BufRead>(mut r: R) -> Result<Option<IndexExtension>> {
+    let buf = r.fill_buf()?;
+    if buf.len() < 4 {
+        // Not enough room for signature
+        return Ok(None);
+    }
+    let sig = &buf[..4];
+    match sig {
+        b"TREE" => {}
+        b"REUC" => {}
+        b"link" => {}
+        b"UNTR" => {}
+        b"FSMN" => {}
+        b"EOIE" => {}
+        b"IEOT" => {}
+        b"sdir" => {}
+        unknown if unknown.iter().all(|c| c.is_ascii()) => {}
+        _ => {
+            // Unknown signature or possibly not one at all
+            return Ok(None);
+        }
+    };
+    let sig_arr = [sig[0], sig[1], sig[2], sig[3]];
+    r.consume(4);
+    let ext_len = r.read_u32::<BigEndian>()?;
+    let mut ext_contents = vec![0; ext_len as usize];
+    r.read_exact(&mut ext_contents[..])?;
+
+    Ok(Some(IndexExtension {
+        sig: sig_arr,
+        contents: ext_contents,
+    }))
+}
+
+fn read_entry<R: BufRead>(mut r: R) -> Result<IndexEntry> {
+    // FIXME: All of these casts make me nervous
+    let ctime = read_time(&mut r)?;
+    let mtime = read_time(&mut r)?;
+    let device = r.read_u32::<BigEndian>()? as i32;
+    let inode = r.read_u32::<BigEndian>()? as u64;
+    let (file_mode, mode) = {
+        let encoded_mode = r.read_u32::<BigEndian>()?;
+        let encoded_type = encoded_mode >> 12;
+        let perms = ((1 << 13) - 1) & encoded_mode;
+        match (encoded_type, perms) {
+            // TODO: these are a bunch of magic numbers
+            // We can probably move them to a method of the type
+            (8u32, 0o100644) => (EntryMode::Normal, perms),
+            (8u32, 0o000644) => (EntryMode::Normal, perms),
+            (8u32, 0o100755) => (EntryMode::Executable, perms),
+            (10u32, 0u32) => (EntryMode::Symlink, 0),
+            (14u32, 0u32) => (EntryMode::Gitlink, 0),
+            _ => {
+                return Err(anyhow!(
+                    "unknown or unsupported file mode: type={}, perms={:0o}",
+                    encoded_type,
+                    perms
+                ))
+            }
+        }
+    };
+    let uid = r.read_u32::<BigEndian>()?;
+    let gid = r.read_u32::<BigEndian>()?;
+    let size = r.read_u32::<BigEndian>()? as i64;
+
+    let mut sha = [0u8; 20];
+    r.read_exact(&mut sha[..])?;
+    let sha = Sha::from_bytes(&sha[..])?;
+
+    // FIXME: What is this?
+    let _flags = r.read_u16::<BigEndian>()?;
+
+    // Take path until nul u32
+    let mut path = Vec::new();
+    r.read_until(0, &mut path)?;
+    path.pop();
+
+    // Take the padding
+    loop {
+        let reader_buf = r.fill_buf()?;
+        if reader_buf.is_empty() {
+            break;
+        }
+        let skip = reader_buf.iter().take_while(|b| **b == 0).count();
+        let reader_buf_len = reader_buf.len();
+        r.consume(skip);
+        if skip < reader_buf_len {
+            break;
+        }
+    }
+    let path = String::from_utf8(path)?;
+
+    Ok(IndexEntry {
+        ctime,
+        mtime,
+        device,
+        inode,
+        mode: mode as u16,
+        uid,
+        gid,
+        size,
+        sha,
+        file_mode,
+        path,
+    })
+}
+
+fn read_time<R: Read>(mut r: R) -> Result<GitTime> {
+    let sec = r.read_u32::<BigEndian>()?;
+    let nsec = r.read_u32::<BigEndian>()?;
+    Ok(GitTime::new(sec, nsec))
+}
+
+pub struct DigestReader<R> {
+    inner: R,
+    digest: sha1::Sha1,
+}
+
+impl<R> DigestReader<R> {
+    fn new(r: R) -> Self {
+        use sha1::Digest;
+        use sha1::Sha1;
+
+        Self {
+            inner: r,
+            digest: Sha1::new(),
+        }
+    }
+
+    fn finalize(self) -> Sha {
+        use sha1::Digest;
+
+        let sha: [u8; 20] = self.digest.finalize().into();
+        Sha::from_array(&sha)
+    }
+}
+
+impl<R: Read> Read for DigestReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::result::Result<usize, std::io::Error> {
+        use sha1::Digest;
+
+        let count = self.inner.read(buf)?;
+        self.digest.update(&buf[..count]);
+        Ok(count)
+    }
+}
+
+impl<R: BufRead> BufRead for DigestReader<R> {
+    fn fill_buf(&mut self) -> std::result::Result<&[u8], std::io::Error> {
+        self.inner.fill_buf()
+    }
+
+    fn consume(&mut self, count: usize) {
+        self.inner.consume(count);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::fs::File;
+    use std::io::BufReader;
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn test_read_write_index() -> Result<(), Box<dyn Error>> {
+        let contents = read_file_contents("tests/data/indices/index")?;
+        let mut index = read_index(Cursor::new(&contents[..]))?;
+        // Assert that it's equal to what we expect
+        let expected_entries = [
+            IndexEntry {
+                ctime: GitTime {
+                    secs: 1636748714,
+                    nanos: 79595821,
+                },
+                mtime: GitTime {
+                    secs: 1636748714,
+                    nanos: 79595821,
+                },
+                device: 16777220,
+                inode: 94496211,
+                mode: 420,
+                uid: 501,
+                gid: 20,
+                size: 0,
+                sha: Sha {
+                    contents: [
+                        230, 157, 226, 155, 178, 209, 214, 67, 75, 139, 41, 174, 119, 90, 216, 194,
+                        228, 140, 83, 145,
+                    ],
+                },
+                file_mode: EntryMode::Normal,
+                path: "bar/baz".into(),
+            },
+            IndexEntry {
+                ctime: GitTime {
+                    secs: 1636748703,
+                    nanos: 647308759,
+                },
+                mtime: GitTime {
+                    secs: 1636748703,
+                    nanos: 647308759,
+                },
+                device: 16777220,
+                inode: 94496183,
+                mode: 420,
+                uid: 501,
+                gid: 20,
+                size: 0,
+                sha: Sha {
+                    contents: [
+                        230, 157, 226, 155, 178, 209, 214, 67, 75, 139, 41, 174, 119, 90, 216, 194,
+                        228, 140, 83, 145,
+                    ],
+                },
+                file_mode: EntryMode::Normal,
+                path: "foo".into(),
+            },
+        ];
+        assert_eq!(index.entries_mut(), expected_entries);
+        let encoded = encode_index(&mut index)?;
+
+        let mismatch = encoded
+            .iter()
+            .zip(contents.iter())
+            .enumerate()
+            .find(|(_, (a, b))| *a != *b)
+            .map(|(i, _)| i);
+        if let Some(i) = mismatch {
+            println!("contents differ at position {}", i);
+        }
+
+        assert_eq!(encoded, contents, "decode/encode was not idempotent");
+
+        Ok(())
+    }
+
+    fn read_file_contents(path: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+        let file = File::open(path)?;
+        let size = file.metadata()?.size();
+
+        let mut contents = Vec::with_capacity(size as usize);
+        BufReader::new(file).read_to_end(&mut contents)?;
+        Ok(contents)
+    }
 }

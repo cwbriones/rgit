@@ -23,7 +23,7 @@ pub struct TreeEntry {
     pub sha: Sha,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryMode {
     Normal,
     Executable,
