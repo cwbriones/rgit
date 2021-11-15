@@ -49,7 +49,7 @@ impl GitClient for GitTcpClient {
         self.stream.write_all(payload.as_bytes())?;
 
         let response = super::receive(&mut self.stream)?;
-        let (_server_capabilities, refs) = super::parse_lines(&response);
+        let (_server_capabilities, refs) = super::parse_lines(&response)?;
         Ok(refs)
     }
 

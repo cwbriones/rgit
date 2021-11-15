@@ -160,7 +160,7 @@ where
             author,
             committer,
             message,
-            sha: sha.clone(),
+            sha,
         },
     )(input)
 }

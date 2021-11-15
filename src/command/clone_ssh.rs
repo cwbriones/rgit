@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use anyhow::Result;
 use structopt::StructOpt;
 
@@ -16,9 +17,13 @@ pub struct SubCommandCloneSsh {
 
 impl SubCommandCloneSsh {
     pub fn execute(self) -> Result<()> {
-        let dir = self.repo.split('.').next().unwrap();
+        let dir = self
+            .repo
+            .split('.')
+            .next()
+            .ok_or_else(|| anyhow!("repo did not end in .git"))?;
         let full_repo = [&self.user, "/", &self.repo].join("");
-        let mut client = GitSSHClient::new(&self.host, &full_repo);
+        let mut client = GitSSHClient::new(&self.host, &full_repo)?;
 
         println!("Cloning into \"{}\"...", dir);
 

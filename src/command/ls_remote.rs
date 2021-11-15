@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use structopt::StructOpt;
 
@@ -19,7 +20,7 @@ pub struct ListRemote {
 ///
 impl ListRemote {
     pub fn execute(&self) -> Result<()> {
-        let mut client = GitHttpClient::new(&self.repo);
+        let mut client = GitHttpClient::new(&self.repo).with_context(|| "create http client")?;
         let pktlines = client.discover_refs()?;
         for p in &pktlines {
             let &GitRef { ref id, ref name } = p;

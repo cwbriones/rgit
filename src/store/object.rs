@@ -7,11 +7,15 @@ use std::io::{
     Read,
     Write,
 };
+use std::path::Path;
 use std::path::PathBuf;
 use std::str;
 
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::{
+    anyhow,
+    Context,
+};
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -51,20 +55,23 @@ impl PackedObject {
         }
     }
 
-    pub fn patch(&self, patch: &[u8]) -> Self {
-        PackedObject {
+    pub fn patch(&self, patch: &[u8]) -> Result<Self> {
+        let content =
+            delta::patch(&self.content, patch).with_context(|| "reconstruct delta object")?;
+        Ok(PackedObject {
             obj_type: self.obj_type,
-            content: delta::patch(&self.content, patch),
+            content,
             sha: RefCell::new(None),
-        }
+        })
     }
 
     ///
     /// Opens the given object from loose form in the repo.
     ///
-    pub fn open(repo: &str, sha: &Sha) -> Result<Self> {
+    pub fn open<P: AsRef<Path>>(repo: P, sha: &Sha) -> Result<Self> {
         let path = object_path(repo, sha);
 
+        // FIXME: This can decode with an intermediate buffer.
         let mut inflated = Vec::new();
         let file = File::open(path)?;
         let mut z = ZlibDecoder::new(file);
@@ -74,9 +81,12 @@ impl PackedObject {
         let sha1_checksum = Sha::compute_from_bytes(&inflated);
         assert_eq!(&sha1_checksum, sha);
 
-        let split_idx = inflated.iter().position(|x| *x == 0).unwrap();
+        let split_idx = inflated
+            .iter()
+            .position(|x| *x == 0)
+            .ok_or_else(|| anyhow!("expected a nul byte"))?;
         let (obj_type, size) = {
-            let header = str::from_utf8(&inflated[..split_idx]).unwrap();
+            let header = str::from_utf8(&inflated[..split_idx])?;
             PackedObject::parse_header(header)?
         };
 
@@ -88,7 +98,7 @@ impl PackedObject {
         Ok(PackedObject {
             obj_type,
             content: footer,
-            sha: RefCell::new(Some(sha.clone())),
+            sha: RefCell::new(Some(*sha)),
         })
     }
 
@@ -110,8 +120,8 @@ impl PackedObject {
     pub fn sha(&self) -> Sha {
         {
             let mut cache = self.sha.borrow_mut();
-            if cache.is_some() {
-                return cache.as_ref().unwrap().clone();
+            if let Some(&s) = cache.as_ref() {
+                return s;
             }
             let (hash, _) = self.encode();
             *cache = Some(hash);
@@ -127,7 +137,13 @@ impl PackedObject {
         let (sha, blob) = self.encode();
         let path = object_path(repo, &sha);
 
-        fs::create_dir_all(path.parent().unwrap())?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow!("object path was a root directory?"))?;
+        if parent.parent().is_some() && !parent.exists() {
+            // Only try to create the parent if it isn't root.
+            fs::create_dir_all(parent)?;
+        }
 
         let file = File::create(&path)?;
         let mut z = ZlibEncoder::new(file, Compression::Default);
@@ -148,7 +164,7 @@ impl PackedObject {
             "tag" => ObjectType::Tag,
             _ => return Err(anyhow!("unknown object type: {}", t)),
         };
-        let size = s.parse::<usize>().unwrap();
+        let size = s.parse::<usize>()?;
         Ok((obj_type, size))
     }
 
@@ -191,11 +207,10 @@ impl PackedObject {
     }
 }
 
-fn object_path(repo: &str, sha: &Sha) -> PathBuf {
+fn object_path<P: AsRef<Path>>(repo: P, sha: &Sha) -> PathBuf {
     let hex_sha = sha.hex();
 
-    let mut path = PathBuf::new();
-    path.push(repo);
+    let mut path = repo.as_ref().to_owned();
     path.push(".git");
     path.push("objects");
     path.push(&hex_sha[..2]);

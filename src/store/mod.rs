@@ -3,6 +3,7 @@ mod object;
 mod tree;
 
 use std::env;
+use std::ffi::OsStr;
 use std::fs::{
     self,
     File,
@@ -13,6 +14,7 @@ use std::io::{
     Read,
     Write,
 };
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{
@@ -38,7 +40,7 @@ use crate::packfile::PackFile;
 pub use crate::store::object::ObjectType;
 pub use crate::store::object::PackedObject;
 
-#[derive(Debug, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Sha {
     contents: [u8; 20],
 }
@@ -112,8 +114,15 @@ impl Sha {
     }
 }
 
+impl std::fmt::Display for Sha {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.hex())
+    }
+}
+
 pub struct Repo {
-    dir: String,
+    dir: PathBuf,
+    gitdir: PathBuf,
     pack: Option<PackFile>,
 }
 
@@ -125,54 +134,68 @@ impl Repo {
     pub fn from_enclosing() -> Result<Self> {
         // Navigate upwards until we are in the repo
         let mut dir = env::current_dir()?;
-        while !is_git_repo(&dir) {
-            assert!(dir.pop(), "Not in a git repo");
+        while dir.parent().is_some() && !is_git_repo(&dir) {
+            dir.pop();
         }
+        if !is_git_repo(&dir) {
+            return Err(anyhow!("not in a git repo"));
+        }
+        let gitdir = dir.join(".git");
 
         let pack_path = Repo::find_packfile(dir.as_path())?;
-
-        let pack = pack_path.map(|path| {
-            let pctx = path.clone();
-            PackFile::open(path)
-                .with_context(|| format!("packfile {:?}", pctx))
-                .unwrap()
-        });
-
-        Ok(Repo {
-            dir: dir.to_str().unwrap().to_owned(),
-            pack,
-        })
+        let pack = match pack_path {
+            Some(path) => {
+                Some(PackFile::open(&path).with_context(|| format!("packfile {:?}", path))?)
+            }
+            None => None,
+        };
+        Ok(Repo { dir, gitdir, pack })
     }
 
-    fn find_packfile(dir: &Path) -> Result<Option<PathBuf>> {
-        let mut pack_path = dir.to_owned();
-        pack_path.push(".git");
+    pub fn gitdir(&self) -> &Path {
+        &self.gitdir
+    }
+
+    fn find_packfile(gitdir: &Path) -> Result<Option<PathBuf>> {
+        let mut pack_path = gitdir.to_owned();
         pack_path.push("objects");
         pack_path.push("pack");
 
         if pack_path.exists() {
             for dir_entry in fs::read_dir(&pack_path)? {
-                let dir_entry = dir_entry.unwrap();
-                let fname = dir_entry.file_name();
-                let fname = fname.to_str().unwrap();
-                if fname.starts_with("pack") && fname.ends_with(".pack") {
-                    pack_path.push(fname);
-                    return Ok(Some(pack_path));
+                let dir_entry = dir_entry?;
+                let path = dir_entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                match path.extension() {
+                    Some(p) if p == "pack" => {}
+                    _ => continue,
+                }
+                let fname = path
+                    .file_name()
+                    .expect("file_name should be nonempty since path is a file");
+                match fname.to_str() {
+                    Some(name) if name.starts_with("pack") => {
+                        pack_path.push(name);
+                        return Ok(Some(pack_path));
+                    }
+                    _ => {}
                 }
             }
         }
         Ok(None)
     }
 
-    pub fn from_packfile(dir: &str, packfile_data: &[u8]) -> Result<Self> {
+    pub fn from_packfile<P: AsRef<Path>>(root: P, packfile_data: &[u8]) -> Result<Self> {
+        let root = root.as_ref();
         let packfile = PackFile::parse(packfile_data)?;
-        let mut root = PathBuf::new();
-        root.push(dir);
-        root.push(".git");
-        packfile.write(&root)?;
+        let gitdir = root.join(".git");
+        packfile.write(&gitdir)?;
 
         Ok(Repo {
-            dir: dir.to_owned(),
+            dir: root.to_owned(),
+            gitdir,
             pack: Some(packfile),
         })
     }
@@ -182,46 +205,58 @@ impl Repo {
     /// of the repository.
     ///
     pub fn checkout_head(&self) -> Result<()> {
-        let tip = resolve_ref(&self.dir, "HEAD")?;
+        let tip = resolve_ref(&self.gitdir, "HEAD")?;
         let mut idx = Vec::new();
         // FIXME: This should also "bubble up" errors, walk needs to return a result.
-        self.walk(&tip)
-            .and_then(|t| self.walk_tree(&self.dir, &t, &mut idx).ok());
+        let mut path = self.dir.to_owned();
+
+        let tree = match self.read_object(&tip)? {
+            o @ PackedObject {
+                obj_type: ObjectType::Commit,
+                ..
+            } => o.as_commit().and_then(|c| self.extract_tree(&c)),
+            o @ PackedObject {
+                obj_type: ObjectType::Tree,
+                ..
+            } => o.as_tree(),
+            _ => {
+                return Err(anyhow!(
+                    "attemped to checkout an object that was not a commit or tree"
+                ))
+            }
+        };
+        tree.ok_or_else(|| anyhow!("failed to retrieve tree"))
+            .and_then(|t| self.walk_tree(&mut path, &t, &mut idx))?;
         let mut idx = Index::new(idx);
-        write_index(&self.dir, &mut idx)?;
+        write_index(&self.gitdir, &mut idx).with_context(|| "write index")?;
         Ok(())
     }
 
-    pub fn walk(&self, sha: &Sha) -> Option<Tree> {
-        self.read_object(sha)
-            .ok()
-            .and_then(|object| match object.obj_type {
-                ObjectType::Commit => object.as_commit().and_then(|c| self.extract_tree(&c)),
-                ObjectType::Tree => object.as_tree(),
-                _ => None,
-            })
-    }
-
-    fn walk_tree(&self, parent: &str, tree: &Tree, idx: &mut Vec<IndexEntry>) -> Result<()> {
+    fn walk_tree(
+        &self,
+        current_path: &mut PathBuf,
+        tree: &Tree,
+        idx: &mut Vec<IndexEntry>,
+    ) -> Result<()> {
         for entry in &tree.entries {
             let &TreeEntry {
                 ref path,
                 ref mode,
                 ref sha,
             } = entry;
-            let mut full_path = PathBuf::new();
-            full_path.push(parent);
-            full_path.push(path);
+            current_path.push(path);
             match mode {
                 EntryMode::SubDirectory => {
-                    fs::create_dir_all(&full_path)?;
-                    let path_str = full_path.to_str().unwrap();
-                    self.walk(sha)
-                        .and_then(|t| self.walk_tree(path_str, &t, idx).ok());
+                    fs::create_dir_all(&current_path)?;
+                    let child = self
+                        .read_object(sha)?
+                        .as_tree()
+                        .ok_or_else(|| anyhow!("subdir entry of tree was not tree"))?;
+                    self.walk_tree(current_path, &child, idx)?;
                 }
                 EntryMode::Normal | EntryMode::Executable => {
                     let object = self.read_object(sha)?;
-                    let mut file = File::create(&full_path)?;
+                    let mut file = File::create(&current_path)?;
                     file.write_all(&object.content[..])?;
                     let meta = file.metadata()?;
                     let mut perms = meta.permissions();
@@ -231,14 +266,14 @@ impl Repo {
                         _ => 33261,
                     };
                     perms.set_mode(raw_mode);
-                    fs::set_permissions(&full_path, perms)?;
+                    fs::set_permissions(&current_path, perms)?;
 
-                    let idx_entry =
-                        get_index_entry(&self.dir, full_path.to_str().unwrap(), mode.clone(), sha)?;
+                    let idx_entry = get_index_entry(&self.dir, &current_path, mode.clone(), sha)?;
                     idx.push(idx_entry);
                 }
                 e => return Err(anyhow!("Unsupported Entry Mode {:?}", e)),
             }
+            current_path.pop();
         }
         Ok(())
     }
@@ -254,10 +289,12 @@ impl Repo {
 
     pub fn read_object(&self, sha: &Sha) -> Result<PackedObject> {
         // Attempt to read from disk first
-        PackedObject::open(&self.dir, sha).or_else(|_| {
-            // If this isn't there, read from the packfile
-            let pack = self.pack.as_ref().unwrap();
-            pack.find_by_sha(sha)
+        PackedObject::open(&self.dir, sha).or_else(|err| {
+            // If this isn't there, try to read from the packfile
+            self.pack
+                .as_ref()
+                .ok_or(err)
+                .and_then(|p| p.find_by_sha(sha))
         })
     }
 
@@ -278,20 +315,19 @@ impl Repo {
 }
 
 fn is_git_repo<P: AsRef<Path>>(p: &P) -> bool {
-    let path = p.as_ref().join(".git");
-    path.exists()
+    p.as_ref().join(".git").exists()
 }
 
 ///
 /// Reads the given ref to a valid SHA.
 ///
-fn resolve_ref(repo: &str, name: &str) -> Result<Sha> {
+fn resolve_ref<P: AsRef<Path>>(gitdir: P, name: &str) -> Result<Sha> {
     // Check if the name is already a sha.
     let trimmed = name.trim();
     if is_hex_sha(trimmed) {
-        Ok(Sha::from_hex(trimmed.as_bytes()).unwrap())
+        Ok(Sha::from_hex(trimmed.as_bytes()).expect("ref was not valid hex characters"))
     } else {
-        read_sym_ref(repo, trimmed)
+        read_sym_ref(gitdir, trimmed).with_context(|| format!("resolve sym ref '{}'", trimmed))
     }
 }
 
@@ -305,11 +341,9 @@ fn is_hex_sha(id: &str) -> bool {
 ///
 /// Reads the symbolic ref and resolve it to the actual ref it represents.
 ///
-fn read_sym_ref(repo: &str, name: &str) -> Result<Sha> {
+fn read_sym_ref<P: AsRef<Path>>(gitdir: P, name: &str) -> Result<Sha> {
     // Read the symbolic ref directly and parse the actual ref out
-    let mut path = PathBuf::new();
-    path.push(repo);
-    path.push(".git");
+    let mut path = gitdir.as_ref().to_owned();
 
     if name != "HEAD" {
         if !name.contains('/') {
@@ -322,15 +356,16 @@ fn read_sym_ref(repo: &str, name: &str) -> Result<Sha> {
 
     // Read the actual ref out
     let mut contents = String::new();
-    let mut file = File::open(path)?;
+    let mut file = File::open(&path)
+        .with_context(|| format!("reading symbolic ref at path {}", path.display()))?;
     file.read_to_string(&mut contents)?;
 
-    if contents.starts_with("ref: ") {
-        let the_ref = contents.split("ref: ").nth(1).unwrap().trim();
-        resolve_ref(repo, the_ref)
+    if let Some(stripped) = contents.strip_prefix("ref: ") {
+        resolve_ref(gitdir, stripped)
     } else {
         let trimmed = contents.trim();
-        let sha = Sha::from_hex(trimmed.as_bytes()).unwrap();
+        let sha = Sha::from_hex(trimmed.as_bytes())
+            .with_context(|| format!("resolving direct ref {}", trimmed))?;
         Ok(sha)
     }
 }
@@ -378,7 +413,7 @@ pub struct IndexEntry {
     size: i64,
     sha: Sha,
     file_mode: EntryMode,
-    path: String,
+    path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -409,12 +444,20 @@ impl GitTime {
     }
 }
 
-fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> Result<IndexEntry> {
+// Retrieve the index entry for the object at the given path.
+fn get_index_entry<R: AsRef<Path>, P: AsRef<Path>>(
+    root: R,
+    path: P,
+    file_mode: EntryMode,
+    sha: &Sha,
+) -> Result<IndexEntry> {
+    let path = path.as_ref();
     let meta = std::fs::metadata(path)?;
 
     // We need to remove the repo path from the path we save on the index entry
-    // FIXME: This doesn't need to be a path since we just discard it again
-    let relative_path = PathBuf::from(path.trim_start_matches(root).trim_start_matches('/'));
+    let relative_path = path
+        .strip_prefix(root)
+        .map_err(|_| anyhow!("entry path was outside of the repository?"))?;
 
     let ctime = {
         let ctime_nsec = meta.ctime_nsec();
@@ -440,18 +483,14 @@ fn get_index_entry(root: &str, path: &str, file_mode: EntryMode, sha: &Sha) -> R
         uid: meta.uid(),
         gid: meta.gid(),
         size: meta.size() as i64,
-        sha: sha.clone(),
-        path: relative_path.to_str().unwrap().to_owned(),
+        sha: *sha,
+        path: relative_path.to_owned(),
         file_mode,
     })
 }
 
-fn write_index(repo: &str, index: &mut Index) -> Result<()> {
-    let mut path = PathBuf::new();
-    path.push(repo);
-    path.push(".git");
-    path.push("index");
-
+fn write_index<P: AsRef<Path>>(gitdir: P, index: &mut Index) -> Result<()> {
+    let path = gitdir.as_ref().join("index");
     let idx_file = File::create(path)?;
     let mut idx_file = BufWriter::new(idx_file);
     encode_index(index, &mut idx_file)
@@ -498,7 +537,8 @@ where
         ref path,
         ..
     } = entry;
-    let flags = (path.len() & 0xFFF) as u16;
+    let path = path.as_os_str();
+    let flags = (path.as_bytes().len() & 0xFFF) as u16;
     let (encoded_type, perms) = match *file_mode {
         EntryMode::Normal | EntryMode::Executable => (8u32, mode as u32),
         EntryMode::Symlink => (10u32, 0u32),
@@ -705,7 +745,7 @@ fn read_entry<R: BufRead>(mut r: R) -> Result<IndexEntry> {
             break;
         }
     }
-    let path = String::from_utf8(path)?;
+    let path = PathBuf::from(OsStr::from_bytes(&path[..]));
 
     Ok(IndexEntry {
         ctime,
@@ -791,7 +831,7 @@ impl<W: Write> DigestWriter<W> {
         use sha1::Digest;
 
         let bytes: [u8; 20] = self.digest.finalize().into();
-        Sha::from_bytes(&bytes[..]).unwrap()
+        Sha::from_array(&bytes)
     }
 }
 

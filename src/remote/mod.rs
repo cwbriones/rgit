@@ -1,4 +1,3 @@
-use std::io;
 use std::io::Read;
 use std::str;
 
@@ -52,20 +51,21 @@ fn create_negotiation_request(capabilities: &[&str], refs: &[GitRef]) -> String 
 ///
 /// Parses all packetlines received from the server into a list of capabilities and a list of refs.
 ///
-fn parse_lines(lines: &[String]) -> (Vec<String>, Vec<GitRef>) {
-    assert!(lines.len() > 1);
+fn parse_lines(lines: &[String]) -> Result<(Vec<String>, Vec<GitRef>)> {
     let mut iter = lines.iter().map(|s| s.trim_end());
 
     // First line contains capabilities separated by '\0'
     let mut parsed = Vec::new();
-    let first = iter.next().unwrap();
+    let first = iter
+        .next()
+        .ok_or_else(|| anyhow!("expected at least one line"))?;
     let (capabilities, first_ref) = parse_first_line(first);
     parsed.push(first_ref);
 
     for line in iter {
         parsed.push(parse_line(line))
     }
-    (capabilities, parsed)
+    Ok((capabilities, parsed))
 }
 
 ///
@@ -98,12 +98,12 @@ fn parse_line(line: &str) -> GitRef {
 /// Reads and parses packet-lines from the given connection
 /// until a null packet is received.
 ///
-fn receive<R: Read>(reader: &mut R) -> io::Result<Vec<String>> {
+fn receive<R: Read>(reader: &mut R) -> Result<Vec<String>> {
     let mut lines = vec![];
     loop {
         match read_packet_line(reader) {
             Ok(Some(line)) => {
-                let s: String = str::from_utf8(&line[..]).unwrap().to_owned();
+                let s: String = String::from_utf8(line)?;
                 lines.push(s)
             }
             Ok(None) => return Ok(lines),
@@ -153,13 +153,13 @@ pub fn receive_with_sideband<R: Read>(reader: &mut R) -> Result<Vec<u8>> {
 ///
 /// Reads and parses a packet-line from the server.
 ///
-fn read_packet_line<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
+fn read_packet_line<R: Read>(reader: &mut R) -> Result<Option<Vec<u8>>> {
     let mut header = [0; 4];
     reader
         .read_exact(&mut header)
         .expect("error parsing header.");
-    let length_str = str::from_utf8(&header[..]).unwrap();
-    let length = u64::from_str_radix(length_str, 16).unwrap();
+    let length_str = str::from_utf8(&header[..])?;
+    let length = u64::from_str_radix(length_str, 16)?;
 
     if length > 4 {
         let mut pkt = vec![0; (length - 4) as usize];

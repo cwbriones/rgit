@@ -16,7 +16,7 @@ ssh2 = "0.9.3"
 crc32fast = "1.2.1"
 regex = "0.1.55"
 faster-hex = "0.6.1"
-anyhow = "1.0.45"
+anyhow = { version = "1.0.45", features = ["backtrace"] }
 
 [[bin]]
 name = "rgit"

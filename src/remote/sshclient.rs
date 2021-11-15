@@ -13,33 +13,33 @@ pub struct GitSSHClient {
 }
 
 impl GitSSHClient {
-    pub fn new(host: &str, repo: &str) -> Self {
-        let stream = TcpStream::connect(host).unwrap();
-        let mut sess = Session::new().unwrap();
+    pub fn new(host: &str, repo: &str) -> Result<Self> {
+        let stream = TcpStream::connect(host)?;
+        let mut sess = Session::new()?;
         sess.set_tcp_stream(stream);
-        sess.handshake().unwrap();
+        sess.handshake()?;
         {
-            let mut agent = sess.agent().unwrap();
-            agent.connect().unwrap();
-            sess.userauth_agent("git").unwrap();
+            let mut agent = sess.agent()?;
+            agent.connect()?;
+            sess.userauth_agent("git")?;
         }
         assert!(sess.authenticated());
 
-        GitSSHClient {
+        Ok(GitSSHClient {
             sess,
             repo: repo.to_owned(),
-        }
+        })
     }
 }
 
 impl GitClient for GitSSHClient {
     fn discover_refs(&mut self) -> Result<Vec<GitRef>> {
-        let mut chan = self.sess.channel_session().unwrap();
+        let mut chan = self.sess.channel_session()?;
         let command = format!("git-upload-pack {}", self.repo);
-        chan.exec(&command).unwrap();
+        chan.exec(&command)?;
 
         let response = super::receive(&mut chan)?;
-        let (_server_capabilities, refs) = super::parse_lines(&response);
+        let (_server_capabilities, refs) = super::parse_lines(&response)?;
         Ok(refs)
     }
 
@@ -49,8 +49,8 @@ impl GitClient for GitSSHClient {
         // FIXME: We shouldn't have to call this command twice because then we are just
         // doing twice the work receiving the refs.
         let command = format!("git-upload-pack {}", self.repo);
-        let mut chan = self.sess.channel_session().unwrap();
-        chan.exec(&command).unwrap();
+        let mut chan = self.sess.channel_session()?;
+        chan.exec(&command)?;
 
         super::receive(&mut chan)?;
         //let (_server_capabilities, refs) = super::parse_lines(&response);

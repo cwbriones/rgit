@@ -121,12 +121,14 @@ impl PackFile {
 
             // Use slice::split_at
             contents = &contents[..contents_len - 20];
-            let index = idx.unwrap_or_else(|| {
-                PackIndex::from_objects(
-                    Objects::new(contents, num_objects).collect(),
-                    &sha_computed,
-                )
-            });
+            let index = if let Some(i) = idx {
+                i
+            } else {
+                let objects = Objects::new(contents, num_objects)
+                    .collect::<Result<Vec<_>, _>>()
+                    .with_context(|| "constructing packfile index")?;
+                PackIndex::from_objects(objects, &sha_computed)
+            };
 
             Ok(PackFile {
                 version,
@@ -230,7 +232,7 @@ impl PackFile {
         // recreating the chain for any object along it, but this shouldn't be necessary
         // for most operations since we will only be concerned with the tip of the chain.
         while let Some(patch) = patches.pop() {
-            accum = accum.patch(&patch);
+            accum = accum.patch(&patch)?;
             // TODO: Cache here
         }
         Ok(accum)
@@ -274,40 +276,51 @@ where
         }
     }
 
-    fn resolve_ref_delta(&mut self) -> Option<(usize, u32, PackedObject)> {
-        match self.ref_deltas.pop() {
+    fn resolve_ref_delta(&mut self) -> Result<Option<(usize, u32, PackedObject)>> {
+        let res = match self.ref_deltas.pop() {
             Some((offset, checksum, delta)) => {
                 let patched = {
-                    let base_object = self.base_objects.get(&delta.base).unwrap();
-                    base_object.patch(&delta.patch)
+                    let base_object = self
+                        .base_objects
+                        .get(&delta.base)
+                        .ok_or_else(|| anyhow!("no object found for sha: {}", delta.base))?;
+                    base_object.patch(&delta.patch)?
                 };
                 {
                     let sha = patched.sha();
-                    self.base_offsets.insert(offset, sha.clone());
+                    self.base_offsets.insert(offset, sha);
                     self.base_objects.insert(sha, patched.clone());
                 }
                 Some((offset, checksum, patched))
             }
             None => None,
-        }
+        };
+        Ok(res)
     }
 
-    fn resolve_ofs_delta(&mut self) -> Option<(usize, u32, PackedObject)> {
-        match self.ofs_deltas.pop() {
+    fn resolve_ofs_delta(&mut self) -> Result<Option<(usize, u32, PackedObject)>> {
+        let res = match self.ofs_deltas.pop() {
             Some((offset, checksum, delta)) => {
                 let patched = {
                     let base = offset - delta.offset;
-                    let base_sha = self.base_offsets.get(&base).unwrap();
-                    let base_object = self.base_objects.get(base_sha).unwrap();
-                    base_object.patch(&delta.patch)
+                    let base_sha = self
+                        .base_offsets
+                        .get(&base)
+                        .ok_or_else(|| anyhow!("no sha found for offset: {}", offset))?;
+                    let base_object = self
+                        .base_objects
+                        .get(base_sha)
+                        .ok_or_else(|| anyhow!("no object found for sha: {}", base_sha))?;
+                    base_object.patch(&delta.patch)?
                 };
                 let sha = patched.sha();
-                self.base_offsets.insert(offset, sha.clone());
+                self.base_offsets.insert(offset, sha);
                 self.base_objects.insert(sha, patched.clone());
                 Some((offset, checksum, patched))
             }
             None => None,
-        }
+        };
+        Ok(res)
     }
 }
 
@@ -316,7 +329,7 @@ where
     R: Read + BufRead,
 {
     // (offset, crc32, Object)
-    type Item = (usize, u32, PackedObject);
+    type Item = Result<(usize, u32, PackedObject)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // First yield all the base objects
@@ -324,7 +337,10 @@ where
             self.remaining -= 1;
             let offset = self.reader.consumed_bytes() + HEADER_LENGTH;
 
-            let object = self.reader.read_object().unwrap();
+            let object = match self.reader.read_object() {
+                Ok(o) => o,
+                Err(e) => return Some(Err(e)),
+            };
             let checksum = object.crc32();
 
             match object {
@@ -333,10 +349,10 @@ where
                 PackEntry::Base(base) => {
                     {
                         let sha = base.sha();
-                        self.base_offsets.insert(offset, sha.clone());
+                        self.base_offsets.insert(offset, sha);
                         self.base_objects.insert(sha, base.clone());
                     }
-                    return Some((offset, checksum, base));
+                    return Some(Ok((offset, checksum, base)));
                 }
             }
         }
@@ -345,9 +361,9 @@ where
             self.ref_deltas.reverse();
             self.ofs_deltas.reverse();
         }
-        // Then resolve and yield all the delta objects
         self.resolve_ref_delta()
-            .or_else(|| self.resolve_ofs_delta())
+            .transpose()
+            .or_else(|| self.resolve_ofs_delta().transpose())
     }
 }
 
@@ -406,7 +422,7 @@ where
             7 => {
                 let mut base_content: [u8; 20] = [0; 20];
                 self.read_exact(&mut base_content)?;
-                let base = Sha::from_bytes(&base_content[..]).unwrap();
+                let base = Sha::from_array(&base_content);
 
                 let content = self.decompress_content(size)?;
                 Ok(PackEntry::RefDelta(RefDelta {

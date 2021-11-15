@@ -22,7 +22,7 @@ impl SubcommandListRemoteSsh {
     ///
     pub fn execute(&self) -> Result<()> {
         let full_repo = [&self.user, "/", &self.repo].join("");
-        let mut client = GitSSHClient::new(&self.host, &full_repo);
+        let mut client = GitSSHClient::new(&self.host, &full_repo)?;
         let pktlines = client.discover_refs()?;
         for p in &pktlines {
             let &GitRef { ref id, ref name } = p;

@@ -1,10 +1,8 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
 
 use anyhow::Result;
 
@@ -14,37 +12,38 @@ pub struct GitRef {
     pub name: String,
 }
 
-pub fn create_refs(repo: &str, refs: &[GitRef]) -> Result<()> {
+pub fn create_refs<P: AsRef<Path>>(gitdir: P, refs: &[GitRef]) -> Result<()> {
     let (tags, branches): (Vec<_>, Vec<_>) = refs
         .iter()
         .filter(|r| !r.name.ends_with("^{}"))
         .partition(|r| r.name.starts_with("refs/tags"));
 
-    write_refs(repo, "refs/remotes/origin", &branches)?;
-    write_refs(repo, "refs/tags", &tags)?;
+    let gitdir = gitdir.as_ref();
+    write_refs(gitdir.join("refs/remotes/origin"), &branches)?;
+    write_refs(gitdir.join("refs/tags"), &tags)?;
     Ok(())
 }
 
-fn write_refs(repo: &str, parent_path: &str, refs: &[&GitRef]) -> Result<()> {
-    let mut path = PathBuf::new();
-    path.push(parent_path);
-
+fn write_refs<P1: AsRef<Path>>(dir: P1, refs: &[&GitRef]) -> Result<()> {
     for r in refs {
-        let mut full_path = path.clone();
-        let simple_name = Path::new(&r.name).file_name().unwrap();
-        full_path.push(&simple_name);
-        create_ref(repo, full_path.to_str().unwrap(), &r.id)?;
+        let simple_name = Path::new(&r.name)
+            .file_name()
+            .expect("constructed path should have a filename");
+        create_ref(dir.as_ref(), simple_name, &r.id)?;
     }
     Ok(())
 }
 
-pub fn update_head(repo: &str, refs: &[GitRef]) -> Result<()> {
+pub fn update_head<P: AsRef<Path>>(gitdir: P, refs: &[GitRef]) -> Result<()> {
     if let Some(head) = refs.iter().find(|r| r.name == "HEAD") {
         let sha1 = &head.id;
         let true_ref = refs.iter().find(|r| r.name != "HEAD" && r.id == *sha1);
-        let dir = true_ref.map_or("refs/heads/master", |r| &r.name[..]);
-        create_ref(repo, dir, sha1)?;
-        create_sym_ref(repo, "HEAD", dir)?;
+        let relpath = true_ref.map_or("refs/heads/master", |r| &r.name[..]);
+
+        let path = gitdir.as_ref().join(relpath);
+        let (dir, name) = split_path(&path).unwrap();
+        create_ref(dir, name, sha1)?;
+        create_sym_ref(gitdir, "HEAD", relpath)?;
     }
     Ok(())
 }
@@ -52,12 +51,13 @@ pub fn update_head(repo: &str, refs: &[GitRef]) -> Result<()> {
 ///
 /// Creates a ref in the given repository.
 ///
-fn create_ref(repo: &str, path: &str, id: &str) -> Result<()> {
-    let mut full_path = PathBuf::new();
-    full_path.push(repo);
-    full_path.push(".git");
-    full_path.push(path);
-    fs::create_dir_all(full_path.parent().unwrap())?;
+fn create_ref<P1: AsRef<Path>, P2: AsRef<Path>>(dir: P1, name: P2, id: &str) -> Result<()> {
+    let dir = dir.as_ref();
+    if !dir.exists() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut full_path = dir.to_owned();
+    full_path.push(name);
     let mut file = File::create(full_path)?;
     file.write_fmt(format_args!("{}\n", id))?;
     Ok(())
@@ -66,12 +66,15 @@ fn create_ref(repo: &str, path: &str, id: &str) -> Result<()> {
 ///
 /// Creates a symbolic ref in the given repository.
 ///
-fn create_sym_ref(repo: &str, name: &str, the_ref: &str) -> Result<()> {
-    let mut path = PathBuf::new();
-    path.push(repo);
-    path.push(".git");
-    path.push(name);
+fn create_sym_ref<P: AsRef<Path>>(gitdir: P, name: &str, the_ref: &str) -> Result<()> {
+    let path = gitdir.as_ref().join(name);
     let mut file = File::create(path)?;
     file.write_fmt(format_args!("ref: {}\n", the_ref))?;
     Ok(())
+}
+
+fn split_path<P: AsRef<Path>>(path: &P) -> Option<(&Path, &OsStr)> {
+    let path = path.as_ref();
+    path.file_name()
+        .and_then(|fname| path.parent().map(|p| (p, fname)))
 }

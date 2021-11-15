@@ -1,5 +1,4 @@
-use std::process;
-
+use anyhow::Result;
 use structopt::StructOpt;
 
 mod command;
@@ -20,18 +19,14 @@ enum Git {
     TestDelta(command::test_delta::SubCommandTestDelta),
 }
 
-fn main() {
+fn main() -> Result<()> {
     let git = Git::from_args();
-    let result = match git {
+    match git {
         Git::Clone(c) => c.execute(),
         Git::CloneSsh(c) => c.execute(),
         Git::ListRemote(c) => c.execute(),
         Git::ListRemoteSsh(c) => c.execute(),
         Git::Log(c) => c.execute(),
         Git::TestDelta(c) => c.execute(),
-    };
-    if let Err(e) = result {
-        println!("Error: {}", e);
-        process::exit(-1)
     }
 }
