@@ -194,26 +194,21 @@ mod tests {
             Bump version to 1.6";
         let input2 = b"tree 9f5829a852fcd8e3381e343b45cb1c9ff33abf56\nauthor Christian Briones <cwbriones@gmail.com> 1418004896 -0800\ncommitter Christian Briones <cwbriones@gmail.com> 1418004914 -0800\n\ninit\n";
         let sha = Sha::from_bytes(&[0u8; 20][..]).unwrap();
-        match parse_commit::<nom::error::VerboseError<&[u8]>>(&input[..], sha) {
-            Ok((_, commit)) => {
-                assert_eq!(
-                    commit.tree.hex(),
-                    "abdf456789012345678901234567890123456789"
-                );
-                assert_eq!(
-                    commit.parents[0].hex(),
-                    "abcdefaaa012345678901234567890123456789a"
-                );
-                assert_eq!(
-                    commit.parents[1].hex(),
-                    "abcdefbbb012345678901234567890123456789a"
-                );
-                assert_eq!(commit.message, "Bump version to 1.6");
-            }
-            Err(e) => {
-                panic!("Failed to parse commit: {}", e);
-            }
-        }
+        let (_, commit) = parse_commit::<nom::error::VerboseError<&[u8]>>(&input[..], sha)
+            .expect("failed to parse commit");
+        assert_eq!(
+            commit.tree.hex(),
+            "abdf456789012345678901234567890123456789"
+        );
+        assert_eq!(
+            commit.parents[0].hex(),
+            "abcdefaaa012345678901234567890123456789a"
+        );
+        assert_eq!(
+            commit.parents[1].hex(),
+            "abcdefbbb012345678901234567890123456789a"
+        );
+        assert_eq!(commit.message, "Bump version to 1.6");
 
         let object2 = PackedObject::new(ObjectType::Commit, (&input2[..]).to_owned());
         assert!(Commit::from_raw(&object2).is_some())
