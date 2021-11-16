@@ -57,7 +57,7 @@ impl GitClient for GitSSHClient {
 
         let request = super::create_negotiation_request(&capabilities[..], want);
 
-        chan.write_all(request.as_bytes())?;
+        chan.write_all(&request[..])?;
         super::receive_with_sideband(&mut chan)
     }
 }

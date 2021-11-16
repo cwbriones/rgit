@@ -30,7 +30,8 @@ impl GitTcpClient {
     ///
     /// Creates the proto request needed to initiate a connection
     ///
-    fn git_proto_request(&self) -> String {
+    fn git_proto_request(&self) -> Vec<u8> {
+        let mut request = Vec::new();
         let s: String = [
             "git-upload-pack /",
             &self.repo[..],
@@ -39,14 +40,15 @@ impl GitTcpClient {
             "\0",
         ]
         .concat();
-        super::pktline(&s[..])
+        super::write_pktline(&s[..], &mut request);
+        request
     }
 }
 
 impl GitClient for GitTcpClient {
     fn discover_refs(&mut self) -> Result<Vec<GitRef>> {
         let payload = self.git_proto_request();
-        self.stream.write_all(payload.as_bytes())?;
+        self.stream.write_all(&payload)?;
 
         let response = super::receive(&mut self.stream)?;
         let (_server_capabilities, refs) = super::parse_lines(&response)?;
@@ -56,7 +58,7 @@ impl GitClient for GitTcpClient {
     fn fetch_packfile(&mut self, want: &[GitRef]) -> Result<Vec<u8>> {
         let capabilities = ["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
         let request = super::create_negotiation_request(&capabilities[..], want);
-        self.stream.write_all(request.as_bytes())?;
+        self.stream.write_all(&request[..])?;
 
         super::receive_with_sideband(&mut self.stream)
     }

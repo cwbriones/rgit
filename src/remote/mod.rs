@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::io::Write;
 use std::str;
 
 use anyhow::anyhow;
@@ -19,8 +20,20 @@ pub trait GitClient {
 ///
 /// Encodes a packet-line for communcation.
 ///
-fn pktline(msg: &str) -> String {
-    format!("{:04x}{}", 4 + msg.len() as u8, msg)
+fn write_pktline(msg: &str, buf: &mut Vec<u8>) {
+    write!(buf, "{:04x}{}", 4 + msg.len() as u8, msg).expect("write into vec cannot fail");
+}
+
+fn write_as_pktline(line: &[&str], buf: &mut Vec<u8>) {
+    let mut total = 0;
+    for item in line {
+        total += item.len();
+    }
+    write!(buf, "{:04x}", 4 + total as u8).expect("write into vec cannot fail");
+    for item in line.iter() {
+        buf.write(item.as_bytes())
+            .expect("write into vec cannot fail");
+    }
 }
 
 // Create a want request for each packet
@@ -28,8 +41,8 @@ fn pktline(msg: &str) -> String {
 // only send refs that are not peeled and in refs/{heads,tags}
 // -- PKT-LINE("want" SP obj-id SP capability-list LF)
 // -- PKT-LINE("want" SP obj-id LF)
-fn create_negotiation_request(capabilities: &[&str], refs: &[GitRef]) -> String {
-    let mut lines = Vec::with_capacity(refs.len());
+fn create_negotiation_request(capabilities: &[&str], refs: &[GitRef]) -> Vec<u8> {
+    let mut lines = Vec::new();
     let filtered = refs.iter().filter(|&&GitRef { name: ref r, .. }| {
         !r.ends_with("^{}") && (r.starts_with("refs/heads") || r.starts_with("refs/tags"))
     });
@@ -38,15 +51,13 @@ fn create_negotiation_request(capabilities: &[&str], refs: &[GitRef]) -> String 
         if i == 0 {
             let caps = capabilities.join(" ");
             // if this is a space it is correctly multiplexed
-            let line: String = ["want ", &o[..], " ", &caps[..], "\n"].concat();
-            lines.push(pktline(&line[..]));
+            write_as_pktline(&["want ", &o[..], " ", &caps[..], "\n"], &mut lines);
         }
-        let line: String = ["want ", &o[..], "\n"].concat();
-        lines.push(pktline(&line[..]));
+        write_as_pktline(&["want ", &o[..], "\n"], &mut lines);
     }
-    lines.push("0000".to_owned());
-    lines.push(pktline("done\n"));
-    lines.concat()
+    lines.write_all(b"0000").expect("write into vec");
+    write_pktline("done\n", &mut lines);
+    lines
 }
 
 ///
@@ -162,5 +173,44 @@ fn read_packet_line<R: Read>(reader: &mut R, buf: &mut Vec<u8>) -> Result<()> {
     } else {
         buf.clear();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_negotation_request() {
+        let capabilities = &["multi_ack_detailed", "side-band-64k", "agent=git/1.8.1"];
+        let refs = &[
+            GitRef {
+                name: "refs/heads/master".into(),
+                id: "abc123".into(),
+            },
+            GitRef {
+                name: "refs/heads/mybranch".into(),
+                id: "def456".into(),
+            },
+            GitRef {
+                name: "refs/heads/ignored^{}".into(),
+                id: "def456".into(),
+            },
+            GitRef {
+                name: "ignored".into(),
+                id: "def456".into(),
+            },
+            GitRef {
+                name: "refs/tags/mytag".into(),
+                id: "def456".into(),
+            },
+        ];
+        let expected = b"0041want abc123 multi_ack_detailed side-band-64k agent=git/1.8.1\n\
+                       0010want abc123\n\
+                       0010want def456\n\
+                       0010want def456\n\
+                       00000009done\n";
+        let req = create_negotiation_request(capabilities, refs);
+        assert_eq!(req, expected);
     }
 }
