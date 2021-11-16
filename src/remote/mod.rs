@@ -2,6 +2,7 @@ use std::io::Read;
 use std::str;
 
 use anyhow::anyhow;
+use anyhow::Context;
 use anyhow::Result;
 
 use crate::packfile::refs::GitRef;
@@ -99,15 +100,15 @@ fn parse_line(line: &str) -> GitRef {
 /// until a null packet is received.
 ///
 fn receive<R: Read>(reader: &mut R) -> Result<Vec<String>> {
-    let mut lines = vec![];
+    let mut lines = Vec::new();
+    let mut line = Vec::new();
     loop {
-        match read_packet_line(reader) {
-            Ok(Some(line)) => {
-                let s: String = String::from_utf8(line)?;
-                lines.push(s)
-            }
-            Ok(None) => return Ok(lines),
-            Err(e) => return Err(e),
+        read_packet_line(reader, &mut line)?;
+        if line.is_empty() {
+            return Ok(lines);
+        } else {
+            let s = str::from_utf8(&line[..])?;
+            lines.push(s.into())
         }
     }
 }
@@ -124,48 +125,42 @@ fn receive<R: Read>(reader: &mut R) -> Result<Vec<String>> {
 ///
 pub fn receive_with_sideband<R: Read>(reader: &mut R) -> Result<Vec<u8>> {
     let mut packfile_data = Vec::new();
+    let mut line = Vec::new();
     loop {
-        match read_packet_line(reader)? {
-            Some(line) => {
-                if &line[..] == b"NAK\n" {
-                    continue;
-                }
-                match line[0] {
-                    1 => {
-                        // TODO: This only uses a loop because Vec::push_all was
-                        // not stabilized for Rust 1.0
-                        for i in &line[1..] {
-                            packfile_data.push(*i)
-                        }
-                    }
-                    2 => {
-                        let msg = str::from_utf8(&line[1..])?;
-                        print!("{}", msg);
-                    }
-                    _ => return Err(anyhow!("git server returned error")),
-                }
+        read_packet_line(reader, &mut line)?;
+        match &line[..] {
+            b"NAK\n" => continue,
+            [1, packdata @ ..] => packfile_data.extend_from_slice(packdata),
+            [2, msg @ ..] => {
+                let msg = str::from_utf8(msg)?;
+                eprint!("{}", msg);
             }
-            None => return Ok(packfile_data),
+            [3, msg @ ..] => {
+                let msg = str::from_utf8(msg)?;
+                eprint!("error: {}", msg);
+                return Err(anyhow!("git server returned error",));
+            }
+            [] => return Ok(packfile_data),
+            _ => return Err(anyhow!("invalid response from server")),
         }
     }
 }
 
 ///
-/// Reads and parses a packet-line from the server.
+/// Reads and parses a pkt-line from the server.
 ///
-fn read_packet_line<R: Read>(reader: &mut R) -> Result<Option<Vec<u8>>> {
+fn read_packet_line<R: Read>(reader: &mut R, buf: &mut Vec<u8>) -> Result<()> {
     let mut header = [0; 4];
-    reader
-        .read_exact(&mut header)
-        .expect("error parsing header.");
+    reader.read_exact(&mut header).context("pkt-line header")?;
     let length_str = str::from_utf8(&header[..])?;
     let length = u64::from_str_radix(length_str, 16)?;
 
     if length > 4 {
-        let mut pkt = vec![0; (length - 4) as usize];
-        reader.read_exact(&mut pkt)?;
-        Ok(Some(pkt))
+        buf.resize((length - 4) as usize, 0);
+        reader.read_exact(&mut buf[..])?;
+        Ok(())
     } else {
-        Ok(None)
+        buf.clear();
+        Ok(())
     }
 }
