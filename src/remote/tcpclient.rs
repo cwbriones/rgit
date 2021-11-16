@@ -1,7 +1,9 @@
-use std::io;
 use std::io::Write;
+use std::net::IpAddr;
 use std::net::TcpStream;
+use std::net::ToSocketAddrs;
 
+use anyhow::anyhow;
 use anyhow::Result;
 
 use super::GitClient;
@@ -10,20 +12,20 @@ use crate::packfile::refs::GitRef;
 pub struct GitTcpClient {
     stream: TcpStream,
     repo: String,
-    host: String,
-    _port: u16,
+    host: IpAddr,
 }
 
 impl GitTcpClient {
-    //pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
-    #[allow(dead_code)]
-    pub fn connect(repo: &str, host: &str, port: u16) -> io::Result<Self> {
-        let stream = TcpStream::connect((host, port))?;
+    pub fn connect<A: ToSocketAddrs>(addr: A, repo: &str) -> Result<Self> {
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| anyhow!("empty addrs"))?;
+        let stream = TcpStream::connect(addr)?;
         Ok(GitTcpClient {
             repo: repo.to_owned(),
             stream,
-            host: host.to_owned(),
-            _port: port,
+            host: addr.ip(),
         })
     }
 
@@ -36,7 +38,7 @@ impl GitTcpClient {
             "git-upload-pack /",
             &self.repo[..],
             "\0host=",
-            &self.host[..],
+            &self.host.to_string(),
             "\0",
         ]
         .concat();

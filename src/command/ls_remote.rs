@@ -1,10 +1,8 @@
-use anyhow::Context;
 use anyhow::Result;
+use reqwest::Url;
 use structopt::StructOpt;
 
 use crate::packfile::refs::GitRef;
-use crate::remote::httpclient::GitHttpClient;
-use crate::remote::GitClient;
 
 #[derive(StructOpt)]
 #[structopt(
@@ -12,7 +10,8 @@ use crate::remote::GitClient;
     about = "list available refs in a remote repository"
 )]
 pub struct ListRemote {
-    repo: String,
+    #[structopt(parse(try_from_str = super::parse_git_url))]
+    remote_url: Url,
 }
 
 ///
@@ -20,7 +19,7 @@ pub struct ListRemote {
 ///
 impl ListRemote {
     pub fn execute(&self) -> Result<()> {
-        let mut client = GitHttpClient::new(&self.repo).with_context(|| "create http client")?;
+        let mut client = super::create_client(&self.remote_url)?;
         let pktlines = client.discover_refs()?;
         for p in &pktlines {
             let &GitRef { ref id, ref name } = p;

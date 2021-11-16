@@ -26,7 +26,7 @@ impl GitHttpClient {
         let mut url = u.into_url()?;
         // Normalize the path, so that our endpoint joins later honor the correct
         // semantics of url.join
-        if !url.path().ends_with("/") {
+        if !url.path().ends_with('/') {
             let mut path = url.path().to_string();
             path.push('/');
             url.set_path(&path);
@@ -76,6 +76,6 @@ impl GitClient for GitHttpClient {
         if !res.status().is_success() {
             return Err(anyhow!("server responded {}", res.status()));
         }
-        super::receive_with_sideband(&mut res).map_err(|e| anyhow::Error::from(e))
+        super::receive_with_sideband(&mut res)
     }
 }

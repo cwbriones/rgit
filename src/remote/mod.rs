@@ -31,7 +31,7 @@ fn write_as_pktline(line: &[&str], buf: &mut Vec<u8>) {
     }
     write!(buf, "{:04x}", 4 + total as u8).expect("write into vec cannot fail");
     for item in line.iter() {
-        buf.write(item.as_bytes())
+        buf.write_all(item.as_bytes())
             .expect("write into vec cannot fail");
     }
 }
